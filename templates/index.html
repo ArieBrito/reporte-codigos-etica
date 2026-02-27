@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <title>Inicio</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/styles.css') }}">
+</head>
+<body>
+
+<header class="header">
+    <img src="{{ url_for('static', filename='assets/logo/logo.svg') }}" class="logo">
+    <div class="header-actions">
+        {% if not usuario %}
+            <a href="{{ url_for('login') }}" class="btn-login">
+                Iniciar sesión
+            </a>
+        {% else %}
+            <span class="estado-label">{{ estado }}</span>
+            <a href="{{ url_for('logout') }}" class="btn-login secondary">
+                Cerrar sesión
+            </a>
+        {% endif %}
+    </div>
+</header>
+
+<div class="hero">
+
+
+    <div class="hero-content">
+        <h1>
+            TABLERO DE SEGUIMIENTO <br/>
+            A LOS ACUERDOS DEL <br/>
+            SISTEMA NACIONAL ANTICORRUPCIÓN
+        </h1>
+
+        <div class="buttons">
+            <button class="btn">
+                Actas
+                <img src="{{ url_for('static', filename='assets/icons/arrow_back.svg') }}">
+            </button>
+
+            <button class="btn">
+                Sesiones
+                <img src="{{ url_for('static', filename='assets/icons/link.svg') }}">
+            </button>
+
+            <button class="btn">
+                Resultados
+                <img src="{{ url_for('static', filename='assets/icons/bar_chart.svg') }}">
+            </button>
+        </div>
+    </div>
+
+</div>
+
+{% if usuario %}
+<div class="menu-section">
+
+    <h3 class="menu-title">Menú</h3>
+
+    <div class="menu">
+        <a class="card" href="{{ url_for('validar_instituciones') }}">
+            <div class="card-text">
+                <h4>Códigos de Ética</h4>
+            </div>
+            <img src="{{ url_for('static', filename='assets/icons/menu3.svg') }}">
+        </a>
+    </div>
+
+</div>
+{% endif %}
+
+</body>
+</html>

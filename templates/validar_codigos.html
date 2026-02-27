@@ -1,0 +1,256 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <title>Validación de códigos</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/styles.css') }}">
+</head>
+
+<body class="codigos-body">
+
+<h1 class="title">Reporte de Códigos de Ética</h1>
+<h2>2. Validación de códigos de ética</h2>
+
+<div id="contenedor"></div>
+
+<br>
+
+<button onclick="window.location.href='/validar-instituciones'">
+    ← Volver a validación de Entes Públicos
+</button>
+
+<button onclick="enviarValidacion()" style="background:#2c7be5;color:white;">
+    Enviar información
+</button>
+
+<script>
+
+/* =========================================
+   UTILIDAD NORMALIZAR
+========================================= */
+function normalizar(txt) {
+    return txt
+        .normalize("NFD")
+        .replace(/[\u0300-\u036f]/g, "")
+        .toLowerCase()
+        .replace(/\s+/g, "_");
+}
+
+/* =========================================
+   HABILITAR / DESHABILITAR CAMPOS
+========================================= */
+function actualizarDependencias(card) {
+
+    const idUnico = card.dataset.idUnico;
+    const cuentaSeleccionada = card.querySelector(
+        `input[name="cuenta_${idUnico}"]:checked`
+    );
+
+    const linkInput = card.querySelector(`#link_${idUnico}`);
+    const fechaInput = card.querySelector(`#fecha_${idUnico}`);
+    const numInput = card.querySelector(`#num_${idUnico}`);
+    const radiosCumple = card.querySelectorAll(
+        `input[name="cumple_${idUnico}"]`
+    );
+
+    if (!cuentaSeleccionada) return;
+
+    if (cuentaSeleccionada.value === "No") {
+
+        linkInput.disabled = true;
+        fechaInput.disabled = true;
+        numInput.disabled = true;
+        radiosCumple.forEach(r => r.disabled = true);
+
+        linkInput.value = "";
+        fechaInput.value = "";
+        numInput.value = "0";
+        radiosCumple.forEach(r => r.checked = false);
+
+    } else {
+
+        linkInput.disabled = false;
+        fechaInput.disabled = false;
+        numInput.disabled = false;
+        radiosCumple.forEach(r => r.disabled = false);
+    }
+}
+
+/* =========================================
+   CARGA INICIAL
+========================================= */
+
+Promise.all([
+    fetch('/instituciones-confirmadas').then(r => r.json()),
+    fetch('/estatus-codigos').then(r => r.json())
+])
+.then(([instituciones, codigosGuardados]) => {
+
+    const contenedor = document.getElementById('contenedor');
+
+    if (!instituciones.length) {
+        contenedor.innerHTML = '<p>No hay instituciones confirmadas.</p>';
+        return;
+    }
+
+    const codigosMap = new Set(codigosGuardados);
+
+    instituciones.forEach(inst => {
+
+        const nombreOriginal = inst.nombre;
+        const nombreSeguro = nombreOriginal.replace(/"/g, '&quot;');
+        const idUnico = normalizar(nombreOriginal);
+
+        const div = document.createElement('div');
+        div.className = 'card';
+        div.dataset.nombre = nombreOriginal;
+        div.dataset.idUnico = idUnico;
+
+        div.innerHTML = `
+            <h3>${nombreSeguro}</h3>
+
+            <p>
+                ¿Cuenta con un Código de Ética publicado?<br/>
+                <label><input type="radio" name="cuenta_${idUnico}" value="Sí"> Sí</label>
+                <label><input type="radio" name="cuenta_${idUnico}" value="No"> No</label>
+            </p>
+
+            <p>
+                Enlace al sitio web oficial<br/>
+                <input type="text" id="link_${idUnico}" placeholder="https://...">
+            </p>
+
+            <p>
+                Fecha de publicación<br/>
+                <input type="date" id="fecha_${idUnico}">
+            </p>
+
+            <p>
+                ¿Cumple con los lineamientos del SNA?<br/>
+                <label><input type="radio" name="cumple_${idUnico}" value="Sí"> Sí</label>
+                <label><input type="radio" name="cumple_${idUnico}" value="No"> No</label>
+            </p>
+
+            <p>
+                Número de instituciones obligadas<br/>
+                <input type="number" id="num_${idUnico}" value="0" min="0">
+            </p>
+
+            <button onclick="editarCode(this)">Editar</button>
+            <button onclick="guardarCode(this)">Guardar</button>
+        `;
+
+        // Bloquear al inicio
+        div.querySelectorAll('input').forEach(i => i.disabled = true);
+
+        // Si ya estaba guardado → marcar visualmente
+        if (codigosMap.has(idUnico)) {
+            div.classList.add('codigo-validado');
+        }
+
+        // Eventos dependencia
+        div.querySelectorAll(`input[name="cuenta_${idUnico}"]`)
+            .forEach(radio => {
+                radio.addEventListener("change", () => {
+                    actualizarDependencias(div);
+                });
+            });
+
+        contenedor.appendChild(div);
+    });
+
+})
+.catch(err => {
+    console.error(err);
+    document.getElementById('contenedor').innerHTML =
+        '<p>Error al cargar la información.</p>';
+});
+
+/* =========================================
+   EDITAR
+========================================= */
+function editarCode(btn) {
+
+    const card = btn.parentElement;
+
+    card.querySelectorAll('input').forEach(i => i.disabled = false);
+
+    actualizarDependencias(card);
+}
+
+/* =========================================
+   GUARDAR
+========================================= */
+function guardarCode(btn) {
+
+    const card = btn.parentElement;
+    const nombreOriginal = card.dataset.nombre;
+    const idUnico = card.dataset.idUnico;
+
+    const cuenta = card.querySelector(`input[name="cuenta_${idUnico}"]:checked`)?.value || '';
+    const cumple = card.querySelector(`input[name="cumple_${idUnico}"]:checked`)?.value || '';
+    const link = card.querySelector(`#link_${idUnico}`).value.trim();
+    const fecha = card.querySelector(`#fecha_${idUnico}`).value;
+    const num = card.querySelector(`#num_${idUnico}`).value;
+
+    const payload = [{
+        nombre: nombreOriginal,
+        cuenta_codigo: cuenta,
+        link: link,
+        fecha_publicacion: fecha,
+        cumple_lineamientos: cumple,
+        num_instituciones: num
+    }];
+
+    fetch('/guardar-validacion-codigos', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+    })
+    .then(r => r.json())
+    .then(() => {
+
+        alert('Código de Ética guardado correctamente');
+
+        card.querySelectorAll('input').forEach(i => i.disabled = true);
+
+        card.classList.add('codigo-validado');
+    })
+    .catch(() => {
+        alert('No se pudo guardar el código');
+    });
+}
+
+/* =========================================
+   ENVÍO FINAL
+========================================= */
+function enviarValidacion() {
+
+    if (!confirm(
+        "Al enviar la información:\n" +
+        "- Se generará un acuse\n" +
+        "- No podrás editar nuevamente\n\n" +
+        "¿Deseas continuar?"
+    )) return;
+
+    fetch('/enviar-validacion', { method: 'POST' })
+    .then(r => r.json())
+    .then(resp => {
+
+        const link = document.createElement('a');
+        link.href = resp.pdf;
+        link.download = '';
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+
+        window.location.href = '/';
+    })
+    .catch(() => {
+        alert('Error al enviar la información');
+    });
+}
+
+</script>
+</body>
+</html>

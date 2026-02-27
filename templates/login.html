@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <title>Iniciar sesión</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/styles.css') }}">
+</head>
+<body class="login-body">
+
+<div class="login-container">
+    <div class="login-logo">
+        <img src="{{ url_for('static', filename='assets/logo/iso_sna.png') }}" alt="SNA">
+    </div>
+    <h1 class="login-title">Bienvenido</h1>
+    </p>
+    {% if error %}
+        <p class="login-error">{{ error }}</p>
+    {% endif %}
+
+    <form method="post" class="login-form">
+
+        <input type="text"
+               name="usuario"
+               placeholder="Usuario"
+               required>
+
+        <input type="password"
+               name="password"
+               placeholder="Contraseña"
+               required>
+
+        <button type="submit" class="login-button">
+            Continuar
+        </button>
+
+    </form>
+
+</div>
+
+</body>
+</html>

@@ -1,0 +1,457 @@
+from flask import (
+    Flask, render_template, request, jsonify,
+    session, redirect, url_for
+)
+import csv
+import os
+import unicodedata
+import re
+from functools import wraps
+from datetime import datetime
+
+from reportlab.lib.pagesizes import LETTER
+from reportlab.pdfgen import canvas
+from reportlab.lib.utils import ImageReader
+from reportlab.platypus import (
+    SimpleDocTemplate, Paragraph, Spacer,
+    ListFlowable, ListItem
+)
+from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
+from reportlab.lib import colors
+from reportlab.lib.units import inch
+
+# --------------------------------------------------
+# APP
+# --------------------------------------------------
+
+app = Flask(__name__)
+app.secret_key = "clave_super_secreta_sna"
+
+BASE_DIR = os.getcwd()
+STATIC_DIR = app.static_folder
+ESTADOS_DIR = os.path.join(STATIC_DIR, "estados")
+os.makedirs(ESTADOS_DIR, exist_ok=True)
+
+RUTA_FONDO = os.path.join(
+    STATIC_DIR,
+    "assets",
+    "acuse",
+    "acuse.png"
+)
+
+# --------------------------------------------------
+# UTILIDADES
+# --------------------------------------------------
+
+def limpiar(txt):
+    if txt is None:
+        return ""
+    return txt.strip().replace("\r", "").replace('"', '').replace('\ufeff', '')
+
+def normalizar_texto(txt):
+    if not txt:
+        return ""
+    txt = limpiar(txt)
+    txt = unicodedata.normalize("NFKD", txt).encode("ascii", "ignore").decode("ascii")
+    txt = re.sub(r"\s+", "_", txt)
+    return txt.lower()
+
+def carpeta_estado(estado):
+    carpeta = normalizar_texto(estado)
+    ruta = os.path.join(ESTADOS_DIR, carpeta)
+    os.makedirs(ruta, exist_ok=True)
+    return ruta
+
+def archivo_entes_estado(estado):
+    return os.path.join(carpeta_estado(estado), "entes.csv")
+
+def archivo_codigos_estado(estado):
+    return os.path.join(carpeta_estado(estado), "codigos.csv")
+
+def archivo_cierre_estado(estado):
+    return os.path.join(carpeta_estado(estado), "cerrado.flag")
+
+# --------------------------------------------------
+# USUARIOS (EJEMPLO)
+# --------------------------------------------------
+
+USUARIOS = {
+    "user_ags": {"password": "a", "estado": "Aguascalientes"},
+    "user_bc": {"password": "53301t1UM4q8", "estado": "Baja California"},
+    "user_bcs": {"password": "cX96VSmjy3kZ", "estado": "Baja California Sur"},
+    "user_cdmx": {"password": "64Oydlt7bxwl", "estado": "Ciudad de México"},
+    "user_mex": {"password": "56RnYLD1Xb7C", "estado": "Estado de México"},
+}
+
+# --------------------------------------------------
+# DECORADOR LOGIN
+# --------------------------------------------------
+
+def login_required(f):
+    @wraps(f)
+    def wrapper(*args, **kwargs):
+        if "usuario" not in session:
+            return redirect(url_for("login"))
+        return f(*args, **kwargs)
+    return wrapper
+
+# --------------------------------------------------
+# LOGIN / LOGOUT
+# --------------------------------------------------
+
+@app.route("/login", methods=["GET", "POST"])
+def login():
+    if request.method == "POST":
+        user = request.form.get("usuario")
+        password = request.form.get("password")
+
+        if user in USUARIOS and USUARIOS[user]["password"] == password:
+            session["usuario"] = user
+            session["estado"] = USUARIOS[user]["estado"]
+            return redirect(url_for("home"))
+
+        return render_template("login.html", error="Credenciales inválidas")
+
+    return render_template("login.html")
+
+
+@app.route("/logout")
+def logout():
+    session.clear()
+    return redirect(url_for("home"))
+
+# --------------------------------------------------
+# HOME
+# --------------------------------------------------
+
+@app.route("/")
+def home():
+    return render_template(
+        "index.html",
+        usuario=session.get("usuario"),
+        estado=session.get("estado")
+    )
+
+# --------------------------------------------------
+# VALIDACIÓN DE INSTITUCIONES
+# --------------------------------------------------
+@app.route("/instituciones-base")
+@login_required
+def instituciones_base():
+    estado = session["estado"]
+    ruta_guardada = archivo_entes_estado(estado)
+
+    # Si ya hay validación previa → usarla
+    if os.path.exists(ruta_guardada):
+        with open(ruta_guardada, newline="", encoding="utf-8") as f:
+            return jsonify({
+                "fuente": "guardado",
+                "data": list(csv.DictReader(f))
+            })
+
+    # Si no → usar CSV original filtrado
+    ruta_original = os.path.join(STATIC_DIR, "OICs.csv")
+
+    with open(ruta_original, newline="", encoding="utf-8") as f:
+        filas = list(csv.DictReader(f))
+
+    filtradas = [
+        fila for fila in filas
+        if limpiar(fila.get("entidad.nombre")) == estado
+    ]
+
+    return jsonify({
+        "fuente": "original",
+        "data": filtradas
+    })
+
+
+@app.route("/validar-instituciones")
+@login_required
+def validar_instituciones():
+    return render_template("validar_instituciones.html")
+
+
+@app.route("/OICs.csv")
+@login_required
+def oics_filtrado():
+    estado = session["estado"]
+    ruta = os.path.join(STATIC_DIR, "OICs.csv")
+
+    with open(ruta, newline="", encoding="utf-8") as f:
+        filas = list(csv.reader(f))
+
+    encabezados = [limpiar(h) for h in filas[0]]
+    idx_estado = encabezados.index("entidad.nombre")
+
+    filtradas = [
+        fila for fila in filas[1:]
+        if limpiar(fila[idx_estado]) == estado
+    ]
+
+    def generar():
+        yield ",".join(f'"{h}"' for h in encabezados) + "\n"
+        for fila in filtradas:
+            yield ",".join(f'"{limpiar(v)}"' for v in fila) + "\n"
+
+    return app.response_class(generar(), mimetype="text/csv")
+
+
+@app.route("/guardar-validacion", methods=["POST"])
+@login_required
+def guardar_validacion():
+    if os.path.exists(archivo_cierre_estado(session["estado"])):
+        return jsonify({"error": "Proceso cerrado"}), 403
+
+    data = request.get_json()
+    ruta = archivo_entes_estado(session["estado"])
+
+    with open(ruta, "w", newline="", encoding="utf-8") as f:
+        writer = csv.writer(f, quoting=csv.QUOTE_ALL)
+        writer.writerow(data["encabezados"])
+        writer.writerows(data["filas"])
+
+    return jsonify({"status": "ok"})
+
+
+@app.route("/hay-entes-confirmados")
+@login_required
+def hay_entes_confirmados():
+    ruta = archivo_entes_estado(session["estado"])
+    if not os.path.exists(ruta):
+        return jsonify({"hay": False})
+
+    with open(ruta) as f:
+        return jsonify({"hay": sum(1 for _ in f) > 1})
+
+
+@app.route("/entes-confirmados-nombres")
+@login_required
+def entes_confirmados_nombres():
+    ruta = archivo_entes_estado(session["estado"])
+    if not os.path.exists(ruta):
+        return jsonify([])
+
+    with open(ruta, newline="", encoding="utf-8") as f:
+        reader = csv.DictReader(f)
+        return jsonify([limpiar(r["nombre"]) for r in reader])
+
+# --------------------------------------------------
+# VALIDACIÓN DE CÓDIGOS
+# --------------------------------------------------
+@app.route("/estatus-codigos")
+@login_required
+def estatus_codigos():
+    ruta = archivo_codigos_estado(session["estado"])
+
+    if not os.path.exists(ruta):
+        return jsonify([])
+
+    with open(ruta, newline="", encoding="utf-8") as f:
+        reader = csv.DictReader(f)
+        return jsonify([
+            normalizar_texto(r["nombre"])
+            for r in reader
+        ])
+
+@app.route("/validar-codigos")
+@login_required
+def validar_codigos():
+    return render_template("validar_codigos.html")
+
+
+@app.route("/instituciones-confirmadas")
+@login_required
+def instituciones_confirmadas():
+    ruta = archivo_entes_estado(session["estado"])
+    if not os.path.exists(ruta):
+        return jsonify([])
+
+    with open(ruta, newline="", encoding="utf-8") as f:
+        return jsonify(list(csv.DictReader(f)))
+
+
+@app.route("/guardar-validacion-codigos", methods=["POST"])
+@login_required
+def guardar_validacion_codigos():
+    if os.path.exists(archivo_cierre_estado(session["estado"])):
+        return jsonify({"error": "Proceso cerrado"}), 403
+
+    data = request.get_json()
+    ruta = archivo_codigos_estado(session["estado"])
+
+    encabezados = [
+        "nombre",
+        "cuenta_codigo",
+        "link",
+        "fecha_publicacion",
+        "cumple_lineamientos",
+        "num_instituciones"
+    ]
+
+    registros = {}
+
+    if os.path.exists(ruta):
+        with open(ruta, newline="", encoding="utf-8") as f:
+            reader = csv.DictReader(f)
+            for r in reader:
+                registros[normalizar_texto(r["nombre"])] = r
+
+    for fila in data:
+        clave = normalizar_texto(fila.get("nombre"))
+        registros[clave] = {
+            "nombre": limpiar(fila.get("nombre")),
+            "cuenta_codigo": limpiar(fila.get("cuenta_codigo")),
+            "link": limpiar(fila.get("link")),
+            "fecha_publicacion": limpiar(fila.get("fecha_publicacion")),
+            "cumple_lineamientos": limpiar(fila.get("cumple_lineamientos")),
+            "num_instituciones": limpiar(fila.get("num_instituciones")),
+        }
+
+    with open(ruta, "w", newline="", encoding="utf-8") as f:
+        writer = csv.DictWriter(f, fieldnames=encabezados, quoting=csv.QUOTE_ALL)
+        writer.writeheader()
+        writer.writerows(registros.values())
+
+    return jsonify({"status": "ok"})
+
+# --------------------------------------------------
+# ENVÍO FINAL + PDF
+# --------------------------------------------------
+
+@app.route("/enviar-validacion", methods=["POST"])
+@login_required
+def enviar_validacion():
+
+    estado = session["estado"]
+
+    ruta_entes = archivo_entes_estado(estado)
+    ruta_codigos = archivo_codigos_estado(estado)
+    ruta_cierre = archivo_cierre_estado(estado)
+
+    if not os.path.exists(ruta_entes):
+        return jsonify({"error": "No hay entes validados"}), 400
+
+    # --------------------------------------------------
+    # CONTEO INSTITUCIONES
+    # --------------------------------------------------
+    with open(ruta_entes, newline="", encoding="utf-8") as f:
+        total_instituciones = sum(1 for _ in f) - 1
+
+    instituciones_validadas = []
+
+    if os.path.exists(ruta_codigos):
+        with open(ruta_codigos, newline="", encoding="utf-8") as f:
+            reader = csv.DictReader(f)
+            for r in reader:
+                nombre = limpiar(r.get("nombre"))
+                if nombre:
+                    instituciones_validadas.append(nombre)
+
+    total_codigos = len(instituciones_validadas)
+
+    # --------------------------------------------------
+    # CREAR PDF
+    # --------------------------------------------------
+    nombre_pdf = f"acuse_codigos_etica_{normalizar_texto(estado)}.pdf"
+    ruta_pdf = os.path.join(carpeta_estado(estado), nombre_pdf)
+
+    doc = SimpleDocTemplate(
+        ruta_pdf,
+        pagesize=LETTER,
+        rightMargin=72,
+        leftMargin=72,
+        topMargin=72,
+        bottomMargin=72
+    )
+
+    elements = []
+
+    styles = getSampleStyleSheet()
+
+    # Estilo personalizado para título
+    estilo_titulo = ParagraphStyle(
+        'Titulo',
+        parent=styles['Heading1'],
+        fontSize=24,
+        textColor=colors.HexColor("#A11C3A"),
+        spaceAfter=20
+    )
+
+    # --------------------------------------------------
+    # CONTENIDO
+    # --------------------------------------------------
+
+    elements.append(Paragraph("ACUSE", estilo_titulo))
+    elements.append(Spacer(1, 0.3 * inch))
+
+    elements.append(Paragraph(f"<b>Estado:</b> {estado}", styles["Normal"]))
+    elements.append(Paragraph(
+        f"<b>Fecha:</b> {datetime.now().strftime('%d/%m/%Y %H:%M')}",
+        styles["Normal"]
+    ))
+    elements.append(Spacer(1, 0.2 * inch))
+
+    elements.append(Paragraph(
+        f"<b>Instituciones reportadas:</b> {total_instituciones}",
+        styles["Normal"]
+    ))
+    elements.append(Paragraph(
+        f"<b>Códigos de Ética validados:</b> {total_codigos}",
+        styles["Normal"]
+    ))
+
+    elements.append(Spacer(1, 0.4 * inch))
+
+    elements.append(Paragraph(
+        "<b>Instituciones con Código Validado:</b>",
+        styles["Heading3"]
+    ))
+
+    elements.append(Spacer(1, 0.2 * inch))
+
+    # --------------------------------------------------
+    # LISTA AUTOMÁTICA CON SALTO DE PÁGINA
+    # --------------------------------------------------
+    lista_items = [
+        ListItem(Paragraph(nombre, styles["Normal"]))
+        for nombre in instituciones_validadas
+    ]
+
+    lista = ListFlowable(
+        lista_items,
+        bulletType='bullet'
+    )
+
+    elements.append(lista)
+
+    elements.append(Spacer(1, 0.5 * inch))
+
+    elements.append(Paragraph(
+        "El proceso queda formalmente cerrado.",
+        styles["Normal"]
+    ))
+
+    # --------------------------------------------------
+    # GENERAR DOCUMENTO
+    # --------------------------------------------------
+    doc.build(elements)
+
+    # Marcar como cerrado
+    with open(ruta_cierre, "w") as f:
+        f.write("CERRADO")
+
+    return jsonify({
+        "status": "ok",
+        "pdf": url_for(
+            "static",
+            filename=f"estados/{normalizar_texto(estado)}/{nombre_pdf}"
+        )
+    })
+
+# --------------------------------------------------
+# ARRANQUE
+# --------------------------------------------------
+
+if __name__ == "__main__":
+    app.run(debug=True)

@@ -1,0 +1,324 @@
+<!DOCTYPE html>
+<html lang="es">
+
+<head>
+    <meta charset="UTF-8">
+    <title>Validación de Entes Públicos</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/styles.css') }}">
+</head>
+
+
+<body class="inst-body">
+
+<h1>Reporte de Códigos de Ética</h1>
+<h2>1. Validación de Entes Públicos</h2>
+
+<div id="tabs">
+    <button type="button" data-poder="Ejecutivo" onclick="filtrar('Ejecutivo')">Poder Ejecutivo</button>
+    <button type="button" data-poder="Legislativo" onclick="filtrar('Legislativo')">Poder Legislativo</button>
+    <button type="button" data-poder="Judicial" onclick="filtrar('Judicial')">Poder Judicial</button>
+    <button type="button" data-poder="Autonomo" onclick="filtrar('Autonomo')">Organismos Autónomos</button>
+    <button type="button" data-poder="Municipio" onclick="filtrar('Municipio')">Municipios</button>
+    <button type="button" data-poder="TODOS" onclick="filtrar('TODOS')">Mostrar todos</button>
+</div>
+
+
+<br>
+
+<form id="formulario-dinamico"></form>
+
+<br>
+
+<button type="button" onclick="window.location.href='/'">
+    Volver al inicio
+    <img src="{{ url_for('static', filename='assets/icons/arrow_back_24dp.svg')}}">
+</button>
+
+<button type="button" onclick="agregarEntrada()" class="btn-add">
+    Añadir nueva entrada
+    <img src="{{ url_for('static', filename='assets/icons/add.svg')}}">
+</button>
+
+<button type="button" onclick="guardarValidacion()" class="btn-guardar">
+    Guardar validación
+    <img src="{{ url_for('static', filename='assets/icons/save.svg')}}">
+</button>
+
+<button type="button" onclick="irAValidarCodigos()" class="btn-validar">
+    Validar Códigos de Ética
+    <img src="{{ url_for('static', filename='assets/icons/arrow_forward.svg')}}">
+</button>
+
+
+<script>
+
+/* =======================
+   CSV PARSER
+======================= */
+function parseCSVLine(line) {
+    const result = [];
+    let current = '';
+    let inQuotes = false;
+
+    for (let i = 0; i < line.length; i++) {
+        const char = line[i];
+        if (char === '"' && line[i + 1] === '"') {
+            current += '"';
+            i++;
+        } else if (char === '"') {
+            inQuotes = !inQuotes;
+        } else if (char === ',' && !inQuotes) {
+            result.push(current);
+            current = '';
+        } else {
+            current += char;
+        }
+    }
+    result.push(current);
+    return result.map(v => v.replace(/^"|"$/g, '').trim());
+}
+
+/* =======================
+   ESTADO
+======================= */
+let encabezados = [];
+let filasOriginales = {};   // id -> columnas
+let poderActivo = 'TODOS';
+let hayCambiosPendientes = false;
+
+/* =======================
+   CARGA INICIAL
+======================= */
+fetch('/instituciones-base')
+    .then(r => r.json())
+    .then(resp => {
+
+        const data = resp.data;
+
+        if (!data.length) return;
+
+        encabezados = Object.keys(data[0]);
+        const formulario = document.getElementById('formulario-dinamico');
+
+        data.forEach(fila => {
+            const columnas = encabezados.map(h => fila[h] || '');
+            const id = fila.id;
+
+            filasOriginales[id] = columnas;
+            crearFila(columnas, id, formulario);
+        });
+
+        restaurarConfirmados();
+        filtrar('TODOS');
+        aplicarEstatusCodigos();
+    });
+/* =======================
+   CREAR FILA
+======================= */
+function crearFila(columnas, id, formulario, esNueva = false) {
+    const idxNombre = encabezados.indexOf('nombre');
+    const idxPoder  = encabezados.indexOf('poderGobierno');
+
+    const div = document.createElement('div');
+    div.className = 'form-group';
+    div.dataset.id = id;
+    div.dataset.poder = columnas[idxPoder];
+    div.dataset.nombre = columnas[idxNombre];
+    div.dataset.confirmado = "false";
+
+    div.innerHTML = `
+        <p>
+            <strong>Estatus:</strong>
+            <span class="badge pendiente">Pendiente de validación</span>
+        </p>
+
+        <p>¿Este ente público se encuentra obligado a
+        <b>EMITIR</b> un Código de Ética según el Art. 16 de la LGRA?</p>
+
+        <input type="text" value="${columnas[idxNombre] || ''}" ${!esNueva ? 'readonly' : ''}>
+        <br>
+
+        <button type="button">Editar</button>
+        <button type="button" style="background:#A57F2C;color:white;">Confirmar</button>
+        <button type="button" style="background:#9B2247;color:white;">Eliminar</button>
+    `;
+
+    const [input, btnEditar, btnConfirmar, btnEliminar] =
+        div.querySelectorAll('input, button');
+
+    input.oninput = () => hayCambiosPendientes = true;
+
+    btnEditar.onclick = () => {
+        input.readOnly = false;
+        div.dataset.confirmado = "false";
+        div.classList.remove('confirmado');
+        hayCambiosPendientes = true;
+    };
+
+    btnConfirmar.onclick = () => {
+        input.readOnly = true;
+        div.dataset.confirmado = "true";
+        div.classList.add('confirmado');
+        hayCambiosPendientes = true;
+    };
+
+    btnEliminar.onclick = () => {
+        delete filasOriginales[id];
+        div.remove();
+        hayCambiosPendientes = true;
+    };
+
+    formulario.appendChild(div);
+}
+
+/* =======================
+   Agregar Estatus
+======================= */
+function aplicarEstatusCodigos() {
+
+    fetch('/estatus-codigos')
+        .then(r => r.json())
+        .then(lista => {
+
+            document.querySelectorAll('.form-group').forEach(div => {
+
+                const nombre = div.dataset.nombre;
+                const nombreNormalizado = nombre
+                    .normalize("NFD")
+                    .replace(/[\u0300-\u036f]/g, "")
+                    .toLowerCase()
+                    .replace(/\s+/g, "_");
+
+                const badge = div.querySelector('.badge');
+
+                if (lista.includes(nombreNormalizado)) {
+                    badge.textContent = "Código Validado";
+                    badge.classList.remove("pendiente");
+                    badge.classList.add("validado");
+                }
+            });
+
+        });
+}
+
+/* =======================
+   RESTAURAR CONFIRMADOS
+======================= */
+function restaurarConfirmados() {
+    fetch('/entes-confirmados-nombres')
+        .then(r => r.json())
+        .then(confirmados => {
+            document.querySelectorAll('.form-group').forEach(div => {
+                if (confirmados.includes(div.dataset.nombre)) {
+                    div.dataset.confirmado = "true";
+                    div.classList.add('confirmado');
+                    div.querySelector('input').readOnly = true;
+                }
+            });
+            hayCambiosPendientes = false;
+        });
+}
+
+/* =======================
+   FILTRADO
+======================= */
+function filtrar(poder) {
+
+    poderActivo = poder;
+
+    // 🔹 Mostrar / ocultar filas
+    document.querySelectorAll('.form-group').forEach(div => {
+        div.style.display =
+            poder === 'TODOS' || div.dataset.poder === poder
+            ? 'block' : 'none';
+    });
+
+    // 🔹 Activar botón visualmente (SOLO dentro de #tabs)
+    const tabs = document.getElementById('tabs');
+    const botones = tabs.querySelectorAll('button');
+
+    botones.forEach(btn => btn.classList.remove('activo'));
+
+    const botonActivo = tabs.querySelector(`[data-poder="${poder}"]`);
+    if (botonActivo) {
+        botonActivo.classList.add('activo');
+    }
+}
+
+/* =======================
+   NUEVA ENTRADA
+======================= */
+function agregarEntrada() {
+    if (poderActivo === 'TODOS') {
+        alert('Selecciona primero un tipo de poder');
+        return;
+    }
+
+    const columnas = Array(encabezados.length).fill('');
+    const idxId = encabezados.indexOf('id');
+    const idxPoder = encabezados.indexOf('poderGobierno');
+
+    const nuevoId = 'nuevo_' + Date.now();
+    columnas[idxId] = nuevoId;
+    columnas[idxPoder] = poderActivo;
+
+    filasOriginales[nuevoId] = columnas;
+    crearFila(columnas, nuevoId, document.getElementById('formulario-dinamico'), true);
+    filtrar(poderActivo);
+    hayCambiosPendientes = true;
+}
+
+/* =======================
+   GUARDAR
+======================= */
+function guardarValidacion() {
+    const filas = [];
+    const idxNombre = encabezados.indexOf('nombre');
+
+    document.querySelectorAll('.form-group').forEach(div => {
+        if (div.dataset.confirmado !== "true") return;
+
+        const columnas = [...filasOriginales[div.dataset.id]];
+        columnas[idxNombre] = div.querySelector('input').value;
+        filas.push(columnas);
+    });
+
+    if (!filas.length) {
+        alert('No hay registros confirmados');
+        return;
+    }
+
+    fetch('/guardar-validacion', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ encabezados, filas })
+    })
+    .then(() => {
+        hayCambiosPendientes = false;
+        alert('Validación guardada correctamente');
+    });
+}
+
+/* =======================
+   NAVEGACIÓN
+======================= */
+function irAValidarCodigos() {
+    if (hayCambiosPendientes) {
+        alert('Guarda la validación antes de continuar');
+        return;
+    }
+
+    fetch('/hay-entes-confirmados')
+        .then(r => r.json())
+        .then(resp => {
+            if (!resp.hay) {
+                alert('Primero confirma al menos una institución');
+                return;
+            }
+            window.location.href = '/validar-codigos';
+        });
+}
+</script>
+
+</body>
+</html>

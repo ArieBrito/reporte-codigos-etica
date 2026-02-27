@@ -1,0 +1,631 @@
+/* =====================================================
+   DESIGN TOKENS
+===================================================== */
+
+:root {
+
+    /* Colores institucionales */
+    --color-primary: #611232;
+    --color-primary-light: #7b173e;
+    --color-accent: #A8163D;
+
+    --color-bg-main: #ffffff;
+    --color-bg-soft: #EBEBEB;
+
+    --color-text-main: #161A1D;
+    --color-text-secondary: #2d3436;
+    --color-text-muted: #444446;
+
+    --color-border-light: #ddd;
+
+    /* Tipografía */
+    --font-heading: 'Patria', serif;
+    --font-body: 'Noto', sans-serif;
+
+    /* Sombras */
+    --shadow-soft: 0 6px 18px rgba(0,0,0,0.06);
+    --shadow-medium: 0 10px 24px rgba(0,0,0,0.12);
+
+    /* Transiciones */
+    --transition-fast: 0.2s ease;
+    --transition-medium: 0.25s ease;
+}
+
+/* =====================================================
+   FUENTES
+===================================================== */
+
+@font-face {
+    font-family: 'Patria';
+    src: url('/static/assets/fonts/HalisRBlack.woff2') format('woff2');
+    font-weight: 700;
+}
+
+@font-face {
+    font-family: 'Noto';
+    src: url('/static/assets/fonts/NotoSans-Regular.woff2') format('woff2');
+    font-weight: 400;
+}
+
+/* =====================================================
+   RESET BASE
+===================================================== */
+
+* {
+    box-sizing: border-box;
+}
+
+body {
+    margin: 0;
+    font-family: var(--font-body);
+    background-color: var(--color-bg-main);
+    color: var(--color-text-secondary);
+}
+
+/* =====================================================
+   HEADER
+===================================================== */
+
+.header {
+    position: relative; /* ya no absolute */
+    width: 100%;
+    padding: 20px 4vw;
+
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+
+    background-color: white;
+    border-bottom: 1px solid #eee;
+
+    z-index: 100;
+}
+
+.logo {
+    width: clamp(140px, 40vw, 200px);
+}
+
+.header-actions {
+    display: flex;
+    align-items: center;
+    gap: 20px;
+}
+
+.estado-label {
+    font-size: 16px;
+    font-weight: 600;
+    color: var(--color-primary);
+}
+
+/* =====================================================
+   HERO
+===================================================== */
+
+.hero {
+    width: 100%;
+    aspect-ratio: 16 / 6.5;
+    position: relative;
+
+    background-image: url("/static/assets/logo/maqueta2.svg");
+    background-size: cover;
+    background-position: center;
+    background-repeat: no-repeat;
+
+    overflow: hidden;
+}
+
+.hero-content {
+    position: absolute;
+    inset: 0;
+
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+}
+
+/* =====================================================
+   TIPOGRAFÍA
+===================================================== */
+
+h1 {
+    font-family: var(--font-heading);
+    font-size: clamp(28px, 3.5vw, 72px);
+    letter-spacing: -0.04em;
+
+    margin: 4vh 0 0 4vw;
+
+    color: var(--color-accent);
+}
+
+h2 {
+    font-family: var(--font-body);
+    font-weight: 600;
+    text-align: center;
+    color: var(--color-text-main);
+}
+
+h3 {
+    font-family: var(--font-heading);
+    text-align: center;
+    color: var(--color-text-main);
+}
+
+h4 {
+    font-family: var(--font-body);
+    color: var(--color-accent);
+}
+
+/* =====================================================
+   BOTONES NAVEGACIÓN SUPERIOR
+===================================================== */
+
+.buttons {
+    display: flex;
+    justify-content: center;
+    gap: 40px;
+    margin-top: 40px;
+}
+
+.btn {
+    background: transparent;
+    border: none;
+    padding: 10px 18px;
+    font-size: 20px;
+    color: var(--color-text-muted);
+    cursor: pointer;
+    border-bottom: 2px solid transparent;
+    transition: var(--transition-fast);
+}
+
+.btn:hover {
+    color: black;
+}
+
+.btn.activo {
+    border-bottom: 2px solid black;
+}
+
+.btn img {
+    width: 16px;
+    height: 16px;
+}
+
+/* =====================================================
+   BOTONES HEADER
+===================================================== */
+
+.btn-login {
+    padding: 8px 18px;
+    border-radius: 6px;
+    font-size: 14px;
+    text-decoration: none;
+
+    background: var(--color-primary);
+    color: white;
+
+    transition: var(--transition-fast);
+}
+
+.btn-login:hover {
+    background: var(--color-primary-light);
+}
+
+.btn-login.secondary {
+    background: transparent;
+    border: 1px solid var(--color-primary);
+    color: var(--color-primary);
+}
+
+.btn-login.secondary:hover {
+    background: var(--color-primary);
+    color: white;
+}
+
+/* =====================================================
+   MENU POST LOGIN
+===================================================== */
+
+.menu-section {
+    background-color: var(--color-bg-soft);
+    text-align: center;
+    padding: 60px 0;
+}
+
+.menu-title {
+    font-size: 28px;
+    margin-bottom: 40px;
+    color: var(--color-text-main);
+}
+
+.menu {
+    display: flex;
+    justify-content: center;
+}
+
+.card {
+    background-color: white;
+    padding: 30px 40px;
+    border-radius: 12px;
+    font-size: 24px;
+    text-decoration: none;
+    color: var(--color-text-secondary);
+
+    display: flex;
+    flex-direction: column;
+    gap: 15px;
+
+    box-shadow: var(--shadow-soft);
+    transition: var(--transition-medium);
+}
+
+.card img {
+    width: 100%;
+}
+
+.card:hover {
+    transform: translateY(-6px);
+    box-shadow: var(--shadow-medium);
+}
+
+/* =====================================================
+   LOGIN PAGE
+===================================================== */
+
+.login-body {
+    background-color: #f2f2f2;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    height: 100vh;
+}
+
+.login-container {
+    background: white;
+    width: 480px;
+    padding: 60px 50px;
+    text-align: center;
+    box-shadow: 0 20px 40px rgba(0,0,0,0.08);
+}
+
+.login-logo img {
+    width: clamp(60px, 8vw, 120px);
+}
+
+.login-title {
+    font-family: var(--font-heading);
+    font-size: 34px;
+    margin: 0;
+}
+
+.login-subtitle {
+    font-size: 14px;
+    margin-bottom: 20px;
+}
+
+.login-error {
+    color: #b02a37;
+    margin-bottom: 20px;
+    font-size: 14px;
+}
+
+.login-form input {
+    width: 100%;
+    padding: 14px;
+    margin-bottom: 20px;
+    border: 1px solid var(--color-border-light);
+    font-size: 16px;
+    outline: none;
+}
+
+.login-form input:focus {
+    border-color: var(--color-primary);
+}
+
+.login-button {
+    width: 100%;
+    padding: 14px;
+    background-color: var(--color-accent);
+    color: white;
+    border: none;
+    font-size: 18px;
+    cursor: pointer;
+    transition: var(--transition-fast);
+}
+
+.login-button:hover {
+    background-color: #8d1132;
+}
+
+/* =====================================================
+   RESPONSIVE
+===================================================== */
+
+@media (max-width: 900px) {
+
+    .buttons {
+        flex-direction: column;
+        align-items: center;
+        gap: 20px;
+    }
+
+    h1 {
+        text-align: center;
+        margin-left: 0;
+        padding: 0 5vw;
+    }
+
+    .header {
+        flex-direction: column;
+        gap: 10px;
+    }
+}
+
+/* ========================================
+   VALIDACIÓN DE ENTES PÚBLICOS
+======================================== */
+
+/* CONTEXTO GENERAL */
+.inst-body {
+    font-family: 'Noto', sans-serif;
+    background-color: #f7f7f7;
+    padding: 40px 60px;
+}
+
+/* TÍTULOS */
+.inst-body h1 {
+    font-family: 'Patria';
+    text-align: center;
+    font-size: 40px;
+    margin-bottom: 5px;
+}
+
+.inst-body h2 {
+    font-family: 'Patria';
+    text-align: left;
+    font-size: 32px;
+    margin-bottom: 25px;
+    color: #161A1D;
+}
+
+/* INPUTS */
+.inst-body input[type="text"] {
+    width: 400px;
+    padding: 8px;
+    border: 1px solid #ccc;
+    font-size: 14px;
+}
+
+.inst-body input[type="text"]:focus {
+    border-color: #611232;
+    outline: none;
+}
+
+/* FORM GROUP */
+.inst-body .form-group {
+    background: white;
+    padding: 20px;
+    margin-bottom: 20px;
+    border-bottom: 1px solid #ccc;
+    box-shadow: 0 5px 15px rgba(0,0,0,0.03);
+}
+
+/* BOTONES GENERALES */
+.inst-body button {
+    margin-right: 6px;
+    margin-top: 8px;
+    cursor: pointer;
+    padding: 6px 10px;
+    border: none;
+    font-size: 14px;
+    transition: 0.2s ease;
+}
+
+/* TABS */
+.inst-body #tabs {
+    margin-bottom: 20px;
+}
+
+.inst-body #tabs button {
+    background: #611232;
+    color: white;
+    border: none;
+    padding: 8px 14px;
+}
+
+.inst-body #tabs button:hover {
+    background: #4a0d25;
+}
+
+.inst-body #tabs button.activo {
+    background: white;
+    color: #161A1D;
+    border: 1px solid #611232;
+}
+
+/* CONFIRMADO */
+.inst-body .confirmado {
+    background-color: #f0f8f0;
+    border-left: 4px solid #4caf50;
+}
+
+/* BOTONES PRINCIPALES ABAJO */
+.inst-body button[style*="#A57F2C"] {
+    background: #A57F2C !important;
+    color: white !important;
+}
+
+.inst-body button[style*="#2B6BF8"] {
+    background: #2B6BF8 !important;
+    color: white !important;
+}
+
+.inst-body button[style*="#9B2247"] {
+    background: #9B2247 !important;
+    color: white !important;
+}
+
+/* ÍCONOS EN BOTONES */
+.inst-body button img {
+    width: 16px;
+    vertical-align: middle;
+    margin-left: 4px;
+}
+
+.inst-body .btn-guardar {
+    background: #A57F2C;
+    color: white;
+}
+
+.inst-body .btn-validar {
+    background: #2B6BF8;
+    color: white;
+}
+
+.inst-body .btn-add {
+    background: #3AC896;
+    color: white;
+}
+
+/* ========================================
+   VALIDACIÓN DE CÓDIGOS DE ÉTICA
+======================================== */
+
+.codigos-body {
+    font-family: 'Noto', sans-serif;
+    background-color: #f7f7f7;
+    padding: 40px 60px;
+}
+
+/* TÍTULOS */
+.codigos-body h1 {
+    font-family: 'Patria';
+    text-align: center;
+    font-size: 40px;
+    margin-bottom: 5px;
+}
+
+.codigos-body h2 {
+    font-family: 'Patria';
+    text-align: left;
+    font-size: 32px;
+    margin-bottom: 25px;
+    color: #161A1D;
+}
+
+/* CONTENEDOR GENERAL */
+.codigos-body #contenedor {
+    max-width: 900px;
+}
+
+/* CARDS */
+.codigos-body .card {
+    background: white;
+    padding: 25px;
+    margin-bottom: 25px;
+    border-radius: 6px;
+    box-shadow: 0 6px 18px rgba(0,0,0,0.04);
+    border-left: 4px solid #611232;
+}
+
+.codigos-body .card h3 {
+    margin-bottom: 15px;
+    font-size: 18px;
+}
+
+/* INPUTS */
+.codigos-body input[type="text"],
+.codigos-body input[type="number"],
+.codigos-body input[type="date"] {
+    width: 420px;
+    padding: 8px;
+    border: 1px solid #ccc;
+    font-size: 14px;
+    margin-top: 4px;
+}
+
+.codigos-body input:focus {
+    border-color: #611232;
+    outline: none;
+}
+
+/* RADIOS */
+.codigos-body label {
+    margin-right: 12px;
+    font-size: 14px;
+}
+
+/* BOTONES GENERALES */
+.codigos-body button {
+    margin-top: 10px;
+    margin-right: 6px;
+    padding: 7px 12px;
+    border: none;
+    font-size: 14px;
+    cursor: pointer;
+    transition: 0.2s ease;
+}
+
+/* BOTÓN EDITAR */
+.codigos-body button:nth-of-type(1) {
+    background: #6c757d;
+    color: white;
+}
+
+.codigos-body button:nth-of-type(1):hover {
+    background: #5a6268;
+}
+
+/* BOTÓN GUARDAR */
+.codigos-body button:nth-of-type(2) {
+    background: #A57F2C;
+    color: white;
+}
+
+.codigos-body button:nth-of-type(2):hover {
+    background: #8a6923;
+}
+
+/* BOTÓN VOLVER */
+.codigos-body > button:first-of-type {
+    background: #611232;
+    color: white;
+}
+
+.codigos-body > button:first-of-type:hover {
+    background: #4a0d25;
+}
+
+/* BOTÓN ENVIAR */
+.codigos-body > button:last-of-type {
+    background: #2c7be5;
+    color: white;
+}
+
+.codigos-body > button:last-of-type:hover {
+    background: #1a5fc4;
+}
+
+/* ESTADO DESHABILITADO */
+.codigos-body input:disabled {
+    background: #f0f0f0;
+    color: #888;
+    cursor: not-allowed;
+}
+
+.badge {
+    padding: 4px 10px;
+    border-radius: 20px;
+    font-size: 12px;
+    font-weight: 600;
+    display: inline-block;
+}
+
+.badge.pendiente {
+    background-color: #fdecea;
+    color: #b42318;
+}
+
+.badge.validado {
+    background-color: #e6f4ea;
+    color: #1e7e34;
+}
