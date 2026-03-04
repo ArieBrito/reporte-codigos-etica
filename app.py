@@ -351,7 +351,7 @@ def enviar_validacion():
     total_codigos = len(instituciones_validadas)
 
     # --------------------------------------------------
-    # CREAR PDF
+    # CREAR PDF CON PLATYPUS + FONDO
     # --------------------------------------------------
     nombre_pdf = f"acuse_codigos_etica_{normalizar_texto(estado)}.pdf"
     ruta_pdf = os.path.join(carpeta_estado(estado), nombre_pdf)
@@ -361,41 +361,40 @@ def enviar_validacion():
         pagesize=LETTER,
         rightMargin=72,
         leftMargin=72,
-        topMargin=72,
+        topMargin=120,   # Ajustado para que no choque con el encabezado del fondo
         bottomMargin=72
     )
 
     elements = []
-
     styles = getSampleStyleSheet()
 
-    # Estilo personalizado para título
     estilo_titulo = ParagraphStyle(
         'Titulo',
         parent=styles['Heading1'],
-        fontSize=24,
+        fontSize=26,
         textColor=colors.HexColor("#A11C3A"),
-        spaceAfter=20
+        alignment=1,  # Centrado
+        spaceAfter=30
     )
 
-    # --------------------------------------------------
+    # -----------------------
     # CONTENIDO
-    # --------------------------------------------------
+    # -----------------------
 
     elements.append(Paragraph("ACUSE", estilo_titulo))
-    elements.append(Spacer(1, 0.3 * inch))
-
     elements.append(Paragraph(f"<b>Estado:</b> {estado}", styles["Normal"]))
     elements.append(Paragraph(
         f"<b>Fecha:</b> {datetime.now().strftime('%d/%m/%Y %H:%M')}",
         styles["Normal"]
     ))
-    elements.append(Spacer(1, 0.2 * inch))
+
+    elements.append(Spacer(1, 0.3 * inch))
 
     elements.append(Paragraph(
         f"<b>Instituciones reportadas:</b> {total_instituciones}",
         styles["Normal"]
     ))
+
     elements.append(Paragraph(
         f"<b>Códigos de Ética validados:</b> {total_codigos}",
         styles["Normal"]
@@ -410,20 +409,23 @@ def enviar_validacion():
 
     elements.append(Spacer(1, 0.2 * inch))
 
-    # --------------------------------------------------
-    # LISTA AUTOMÁTICA CON SALTO DE PÁGINA
-    # --------------------------------------------------
-    lista_items = [
-        ListItem(Paragraph(nombre, styles["Normal"]))
-        for nombre in instituciones_validadas
-    ]
+    if instituciones_validadas:
+        lista_items = [
+            ListItem(Paragraph(nombre, styles["Normal"]))
+            for nombre in instituciones_validadas
+        ]
 
-    lista = ListFlowable(
-        lista_items,
-        bulletType='bullet'
-    )
-
-    elements.append(lista)
+        elements.append(
+            ListFlowable(
+                lista_items,
+                bulletType='bullet'
+            )
+        )
+    else:
+        elements.append(
+            Paragraph("No se registraron códigos validados.",
+                      styles["Normal"])
+        )
 
     elements.append(Spacer(1, 0.5 * inch))
 
@@ -433,11 +435,33 @@ def enviar_validacion():
     ))
 
     # --------------------------------------------------
+    # FUNCIÓN PARA DIBUJAR FONDO
+    # --------------------------------------------------
+    def dibujar_fondo(canvas, doc):
+        width, height = LETTER
+        fondo = ImageReader(RUTA_FONDO)
+        canvas.drawImage(
+            fondo,
+            0,
+            0,
+            width=width,
+            height=height,
+            preserveAspectRatio=True,
+            mask='auto'
+        )
+
+    # --------------------------------------------------
     # GENERAR DOCUMENTO
     # --------------------------------------------------
-    doc.build(elements)
+    doc.build(
+        elements,
+        onFirstPage=dibujar_fondo,
+        onLaterPages=dibujar_fondo
+    )
 
-    # Marcar como cerrado
+    # --------------------------------------------------
+    # MARCAR COMO CERRADO
+    # --------------------------------------------------
     with open(ruta_cierre, "w") as f:
         f.write("CERRADO")
 
