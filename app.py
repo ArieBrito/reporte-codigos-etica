@@ -10,7 +10,6 @@ from functools import wraps
 from datetime import datetime
 
 from reportlab.lib.pagesizes import LETTER
-from reportlab.pdfgen import canvas
 from reportlab.lib.utils import ImageReader
 from reportlab.platypus import (
     SimpleDocTemplate, Paragraph, Spacer,
@@ -29,6 +28,7 @@ app.secret_key = "clave_super_secreta_sna"
 
 BASE_DIR = os.getcwd()
 STATIC_DIR = app.static_folder
+
 ESTADOS_DIR = os.path.join(STATIC_DIR, "estados")
 os.makedirs(ESTADOS_DIR, exist_ok=True)
 
@@ -72,7 +72,7 @@ def archivo_cierre_estado(estado):
     return os.path.join(carpeta_estado(estado), "cerrado.flag")
 
 # --------------------------------------------------
-# USUARIOS (EJEMPLO)
+# USUARIOS
 # --------------------------------------------------
 
 USUARIOS = {
@@ -90,9 +90,12 @@ USUARIOS = {
 def login_required(f):
     @wraps(f)
     def wrapper(*args, **kwargs):
+
         if "usuario" not in session:
-            return redirect(url_for("login"))
+            return redirect(url_for("home"))
+
         return f(*args, **kwargs)
+
     return wrapper
 
 # --------------------------------------------------
@@ -101,23 +104,32 @@ def login_required(f):
 
 @app.route("/login", methods=["GET", "POST"])
 def login():
+
     if request.method == "POST":
+
         user = request.form.get("usuario")
         password = request.form.get("password")
 
         if user in USUARIOS and USUARIOS[user]["password"] == password:
+
             session["usuario"] = user
             session["estado"] = USUARIOS[user]["estado"]
+
             return redirect(url_for("home"))
 
-        return render_template("login.html", error="Credenciales inválidas")
+        return render_template(
+            "login.html",
+            error="Credenciales inválidas"
+        )
 
     return render_template("login.html")
 
 
 @app.route("/logout")
 def logout():
+
     session.clear()
+
     return redirect(url_for("home"))
 
 # --------------------------------------------------
@@ -126,6 +138,7 @@ def logout():
 
 @app.route("/")
 def home():
+
     return render_template(
         "index.html",
         usuario=session.get("usuario"),
@@ -135,21 +148,34 @@ def home():
 # --------------------------------------------------
 # VALIDACIÓN DE INSTITUCIONES
 # --------------------------------------------------
+
+@app.route("/validar-instituciones")
+@login_required
+def validar_instituciones():
+
+    return render_template(
+        "validar_instituciones.html",
+        usuario=session.get("usuario"),
+        estado=session.get("estado")
+    )
+
+
 @app.route("/instituciones-base")
 @login_required
 def instituciones_base():
+
     estado = session["estado"]
     ruta_guardada = archivo_entes_estado(estado)
 
-    # Si ya hay validación previa → usarla
     if os.path.exists(ruta_guardada):
+
         with open(ruta_guardada, newline="", encoding="utf-8") as f:
+
             return jsonify({
                 "fuente": "guardado",
                 "data": list(csv.DictReader(f))
             })
 
-    # Si no → usar CSV original filtrado
     ruta_original = os.path.join(STATIC_DIR, "OICs.csv")
 
     with open(ruta_original, newline="", encoding="utf-8") as f:
@@ -166,48 +192,21 @@ def instituciones_base():
     })
 
 
-@app.route("/validar-instituciones")
-@login_required
-def validar_instituciones():
-    return render_template("validar_instituciones.html")
-
-
-@app.route("/OICs.csv")
-@login_required
-def oics_filtrado():
-    estado = session["estado"]
-    ruta = os.path.join(STATIC_DIR, "OICs.csv")
-
-    with open(ruta, newline="", encoding="utf-8") as f:
-        filas = list(csv.reader(f))
-
-    encabezados = [limpiar(h) for h in filas[0]]
-    idx_estado = encabezados.index("entidad.nombre")
-
-    filtradas = [
-        fila for fila in filas[1:]
-        if limpiar(fila[idx_estado]) == estado
-    ]
-
-    def generar():
-        yield ",".join(f'"{h}"' for h in encabezados) + "\n"
-        for fila in filtradas:
-            yield ",".join(f'"{limpiar(v)}"' for v in fila) + "\n"
-
-    return app.response_class(generar(), mimetype="text/csv")
-
-
 @app.route("/guardar-validacion", methods=["POST"])
 @login_required
 def guardar_validacion():
+
     if os.path.exists(archivo_cierre_estado(session["estado"])):
         return jsonify({"error": "Proceso cerrado"}), 403
 
     data = request.get_json()
+
     ruta = archivo_entes_estado(session["estado"])
 
     with open(ruta, "w", newline="", encoding="utf-8") as f:
+
         writer = csv.writer(f, quoting=csv.QUOTE_ALL)
+
         writer.writerow(data["encabezados"])
         writer.writerows(data["filas"])
 
@@ -217,67 +216,99 @@ def guardar_validacion():
 @app.route("/hay-entes-confirmados")
 @login_required
 def hay_entes_confirmados():
+
     ruta = archivo_entes_estado(session["estado"])
+
     if not os.path.exists(ruta):
         return jsonify({"hay": False})
 
     with open(ruta) as f:
-        return jsonify({"hay": sum(1 for _ in f) > 1})
+
+        return jsonify({
+            "hay": sum(1 for _ in f) > 1
+        })
 
 
 @app.route("/entes-confirmados-nombres")
 @login_required
 def entes_confirmados_nombres():
+
     ruta = archivo_entes_estado(session["estado"])
+
     if not os.path.exists(ruta):
         return jsonify([])
 
     with open(ruta, newline="", encoding="utf-8") as f:
+
         reader = csv.DictReader(f)
-        return jsonify([limpiar(r["nombre"]) for r in reader])
+
+        return jsonify([
+            limpiar(r["nombre"])
+            for r in reader
+        ])
 
 # --------------------------------------------------
 # VALIDACIÓN DE CÓDIGOS
 # --------------------------------------------------
+
+@app.route("/validar-codigos")
+@login_required
+def validar_codigos():
+
+    ruta = archivo_entes_estado(session["estado"])
+
+    if not os.path.exists(ruta):
+        return redirect(url_for("validar_instituciones"))
+
+    return render_template(
+        "validar_codigos.html",
+        usuario=session.get("usuario"),
+        estado=session.get("estado")
+    )
+
+
 @app.route("/estatus-codigos")
 @login_required
 def estatus_codigos():
+
     ruta = archivo_codigos_estado(session["estado"])
 
     if not os.path.exists(ruta):
         return jsonify([])
 
     with open(ruta, newline="", encoding="utf-8") as f:
+
         reader = csv.DictReader(f)
+
         return jsonify([
             normalizar_texto(r["nombre"])
             for r in reader
         ])
 
-@app.route("/validar-codigos")
-@login_required
-def validar_codigos():
-    return render_template("validar_codigos.html")
-
 
 @app.route("/instituciones-confirmadas")
 @login_required
 def instituciones_confirmadas():
+
     ruta = archivo_entes_estado(session["estado"])
+
     if not os.path.exists(ruta):
         return jsonify([])
 
     with open(ruta, newline="", encoding="utf-8") as f:
+
         return jsonify(list(csv.DictReader(f)))
 
 
 @app.route("/guardar-validacion-codigos", methods=["POST"])
 @login_required
 def guardar_validacion_codigos():
+
     if os.path.exists(archivo_cierre_estado(session["estado"])):
         return jsonify({"error": "Proceso cerrado"}), 403
 
     data = request.get_json()
+
     ruta = archivo_codigos_estado(session["estado"])
 
     encabezados = [
@@ -292,13 +323,19 @@ def guardar_validacion_codigos():
     registros = {}
 
     if os.path.exists(ruta):
+
         with open(ruta, newline="", encoding="utf-8") as f:
+
             reader = csv.DictReader(f)
+
             for r in reader:
+
                 registros[normalizar_texto(r["nombre"])] = r
 
     for fila in data:
+
         clave = normalizar_texto(fila.get("nombre"))
+
         registros[clave] = {
             "nombre": limpiar(fila.get("nombre")),
             "cuenta_codigo": limpiar(fila.get("cuenta_codigo")),
@@ -309,7 +346,13 @@ def guardar_validacion_codigos():
         }
 
     with open(ruta, "w", newline="", encoding="utf-8") as f:
-        writer = csv.DictWriter(f, fieldnames=encabezados, quoting=csv.QUOTE_ALL)
+
+        writer = csv.DictWriter(
+            f,
+            fieldnames=encabezados,
+            quoting=csv.QUOTE_ALL
+        )
+
         writer.writeheader()
         writer.writerows(registros.values())
 

@@ -367,6 +367,9 @@ h4 {
 .inst-body {
     font-family: 'Noto', sans-serif;
     background-color: #f7f7f7;
+}
+
+.inst-container {
     padding: 40px 60px;
 }
 
@@ -475,6 +478,9 @@ h4 {
 .codigos-body {
     font-family: 'Noto', sans-serif;
     background-color: #f7f7f7;
+}
+
+.codigos-container {
     padding: 40px 60px;
 }
 
@@ -491,6 +497,19 @@ h4 {
     font-size: 28px;
     margin-bottom: 25px;
     color: #161A1D;
+}
+
+.codigos-body h3 {
+    font-family: 'Noto';
+    text-align: left;
+    margin-bottom: 25px;
+    color: #161A1D;
+}
+
+.codigos-body .card p {
+    font-size: 16px;
+    line-height: 1.4;
+    margin-bottom: 10px;
 }
 
 .codigos-body #contenedor {
@@ -542,21 +561,21 @@ h4 {
 }
 
 .codigos-body button:nth-of-type(1) {
-    background: #6c757d;
-    color: white;
+    background: #F0F0F0;
+    color: #161A1D;
 }
 
 .codigos-body button:nth-of-type(1):hover {
-    background: #5a6268;
+    background: #cecece;
 }
 
 .codigos-body button:nth-of-type(2) {
-    background: #A57F2C;
+    background: #3AC896;
     color: white;
 }
 
 .codigos-body button:nth-of-type(2):hover {
-    background: #8a6923;
+    background: #34b185;
 }
 
 .codigos-body > button:last-of-type {
@@ -565,7 +584,7 @@ h4 {
 }
 
 .codigos-body > button:last-of-type:hover {
-    background: #1a5fc4;
+    background: #134999;
 }
 
 .codigos-body input:disabled {

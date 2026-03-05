@@ -1,12 +1,12 @@
-<!DOCTYPE html>
-<html lang="es">
-<head>
-    <meta charset="UTF-8">
-    <title>Validación de códigos</title>
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/styles.css') }}">
-</head>
+{% extends "base.html" %}
 
-<body class="codigos-body">
+{% block title %}Validación de códigos{% endblock %}
+
+{% block body_class %}codigos-body{% endblock %}
+
+{% block content %}
+
+<div class="codigos-container">
 
 <h1 class="title">Reporte de Códigos de Ética</h1>
 <h2>2. Validación de códigos de ética</h2>
@@ -19,7 +19,7 @@
     ← Volver a validación de Entes Públicos
 </button>
 
-<button onclick="enviarValidacion()" style="background:#2c7be5;color:white;">
+<button onclick="enviarValidacion()">
     Enviar información
 </button>
 
@@ -252,5 +252,10 @@ function enviarValidacion() {
 }
 
 </script>
+
+</div>
+
+{% endblock %}
+
 </body>
 </html>

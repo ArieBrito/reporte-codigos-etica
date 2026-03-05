@@ -1,27 +1,8 @@
-<!DOCTYPE html>
-<html lang="es">
-<head>
-    <meta charset="UTF-8">
-    <title>Inicio</title>
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/styles.css') }}">
-</head>
-<body>
+{% extends "base.html" %}
 
-<header class="header">
-    <img src="{{ url_for('static', filename='assets/logo/logo.svg') }}" class="logo">
-    <div class="header-actions">
-        {% if not usuario %}
-            <a href="{{ url_for('login') }}" class="btn-login">
-                Iniciar sesión
-            </a>
-        {% else %}
-            <span class="estado-label">{{ estado }}</span>
-            <a href="{{ url_for('logout') }}" class="btn-login secondary">
-                Cerrar sesión
-            </a>
-        {% endif %}
-    </div>
-</header>
+{% block title %}Inicio{% endblock %}
+
+{% block content %}
 
 <div class="hero">
 
@@ -69,6 +50,8 @@
 
 </div>
 {% endif %}
+
+{% endblock %}
 
 </body>
 </html>

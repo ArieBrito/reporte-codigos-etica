@@ -1,14 +1,12 @@
-<!DOCTYPE html>
-<html lang="es">
+{% extends "base.html" %}
 
-<head>
-    <meta charset="UTF-8">
-    <title>Validación de Entes Públicos</title>
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/styles.css') }}">
-</head>
+{% block title %}Validación de Entes Públicos{% endblock %}
 
+{% block body_class %}inst-body{% endblock %}
 
-<body class="inst-body">
+{% block content %}
+
+<div class="inst-container">
 
 <h1>Reporte de Códigos de Ética</h1>
 <h2>1. Validación de Entes Públicos</h2>
@@ -48,7 +46,6 @@
     Validar Códigos de Ética
     <img src="{{ url_for('static', filename='assets/icons/arrow_forward.svg')}}">
 </button>
-
 
 <script>
 
@@ -319,6 +316,9 @@ function irAValidarCodigos() {
         });
 }
 </script>
+
+</div>
+{% endblock %}
 
 </body>
 </html>
