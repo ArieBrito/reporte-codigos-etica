@@ -34,7 +34,7 @@
     <img src="{{ url_for('static', filename='assets/icons/arrow_back_24dp.svg')}}">
 </button>
 
-<button type="button" onclick="agregarEntrada()" class="btn-add">
+<button type="button" onclick="agregarEntrada()">
     Añadir nueva entrada
     <img src="{{ url_for('static', filename='assets/icons/add.svg')}}">
 </button>
@@ -139,7 +139,7 @@ function crearFila(columnas, id, formulario, esNueva = false) {
         <br>
 
         <button type="button">Editar</button>
-        <button type="button" style="background:#A57F2C;color:white;">Confirmar</button>
+        <button type="button">Confirmar</button>
         <button type="button" style="background:#9B2247;color:white;">Eliminar</button>
     `;
 
