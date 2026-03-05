@@ -84,6 +84,69 @@ USUARIOS = {
 }
 
 # --------------------------------------------------
+# Resultados
+# --------------------------------------------------
+@app.route("/resultados")
+def resultados():
+    return render_template("resultados.html")
+
+@app.route("/api/resultados")
+def api_resultados():
+
+    estados = []
+    codigos_por_estado = {}
+    total_codigos = 0
+    años = {}
+
+    for carpeta in os.listdir(ESTADOS_DIR):
+
+        ruta_codigos = os.path.join(ESTADOS_DIR, carpeta, "codigos.csv")
+        ruta_entes = os.path.join(ESTADOS_DIR, carpeta, "entes.csv")
+
+        if not os.path.exists(ruta_codigos):
+            continue
+
+        estado_nombre = carpeta.replace("_", " ").title()
+
+        with open(ruta_codigos, newline="", encoding="utf-8") as f:
+            reader = csv.DictReader(f)
+            lista = list(reader)
+
+        total_estado = len(lista)
+        codigos_por_estado[estado_nombre] = total_estado
+        total_codigos += total_estado
+
+        for r in lista:
+            fecha = r.get("fecha_publicacion", "")
+            if fecha:
+                año = fecha[:4]
+                años[año] = años.get(año, 0) + 1
+
+        total_instituciones = 0
+        if os.path.exists(ruta_entes):
+            with open(ruta_entes) as f:
+                total_instituciones = sum(1 for _ in f) - 1
+
+        porcentaje = 0
+        if total_instituciones > 0:
+            porcentaje = round((total_estado / total_instituciones) * 100, 2)
+
+        estados.append({
+            "entidad": estado_nombre,
+            "instituciones": total_instituciones,
+            "porcentaje": porcentaje
+        })
+
+    años_ordenados = sorted(años.items())
+
+    return jsonify({
+        "total_codigos": total_codigos,
+        "años": [a for a,b in años_ordenados],
+        "valores": [b for a,b in años_ordenados],
+        "mapa": codigos_por_estado,
+        "estados": estados
+    })
+# --------------------------------------------------
 # DECORADOR LOGIN
 # --------------------------------------------------
 

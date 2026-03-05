@@ -10,7 +10,10 @@
 <body class="{% block body_class %}{% endblock %}">
 
 <header class="header">
-    <img src="{{ url_for('static', filename='assets/logo/logo.svg') }}" class="logo">
+
+    <a href="{{ url_for('home') }}">
+        <img src="{{ url_for('static', filename='assets/logo/logo.svg') }}" class="logo">
+    </a>
 
     <div class="header-actions">
         {% if not usuario %}
@@ -24,6 +27,7 @@
             </a>
         {% endif %}
     </div>
+
 </header>
 
 {% block content %}
