@@ -15,13 +15,45 @@
 
 <br>
 
-<button type= "button" onclick="window.location.href='/validar-instituciones'">
-    ← Volver a validación de Entes Públicos
+<button type="button" onclick="window.location.href='/validar-instituciones'">
+← Volver a validación de Entes Públicos
 </button>
 
 <button onclick="enviarValidacion()">
-    Enviar información
+Enviar información
 </button>
+
+
+<!-- ================================
+MODAL DE CONFIRMACIÓN
+================================ -->
+<div id="confirmModal" class="modal-overlay">
+  <div class="modal-box">
+
+    <div class="modal-header">
+      ⚠ Confirmación de envío
+    </div>
+
+    <div class="modal-body">
+
+      <p>Al enviar la información:</p>
+
+      <ul>
+        <li>Se generará un <b>acuse oficial</b></li>
+        <li>No podrás <b>editar nuevamente</b></li>
+      </ul>
+
+      <p class="warning">Esta acción es irreversible.</p>
+
+    </div>
+
+    <div class="modal-actions">
+      <button class="btn-cancel" onclick="cerrarConfirm()">Cancelar</button>
+      <button class="btn-confirm" onclick="confirmarEnvio()">Enviar información</button>
+    </div>
+
+  </div>
+</div>
 
 <script>
 
@@ -75,6 +107,7 @@ function actualizarDependencias(card) {
         radiosCumple.forEach(r => r.disabled = false);
     }
 }
+
 
 /* =========================================
    CARGA INICIAL
@@ -140,15 +173,12 @@ Promise.all([
             <button onclick="guardarCode(this)">Guardar</button>
         `;
 
-        // Bloquear al inicio
         div.querySelectorAll('input').forEach(i => i.disabled = true);
 
-        // Si ya estaba guardado → marcar visualmente
         if (codigosMap.has(idUnico)) {
             div.classList.add('codigo-validado');
         }
 
-        // Eventos dependencia
         div.querySelectorAll(`input[name="cuenta_${idUnico}"]`)
             .forEach(radio => {
                 radio.addEventListener("change", () => {
@@ -162,9 +192,8 @@ Promise.all([
 })
 .catch(err => {
     console.error(err);
-    document.getElementById('contenedor').innerHTML =
-        '<p>Error al cargar la información.</p>';
 });
+
 
 /* =========================================
    EDITAR
@@ -177,6 +206,7 @@ function editarCode(btn) {
 
     actualizarDependencias(card);
 }
+
 
 /* =========================================
    GUARDAR
@@ -221,17 +251,25 @@ function guardarCode(btn) {
     });
 }
 
-/* =========================================
-   ENVÍO FINAL
-========================================= */
-function enviarValidacion() {
 
-    if (!confirm(
-        "Al enviar la información:\n" +
-        "- Se generará un acuse\n" +
-        "- No podrás editar nuevamente\n\n" +
-        "¿Deseas continuar?"
-    )) return;
+/* =========================================
+   ABRIR MODAL
+========================================= */
+function enviarValidacion(){
+    document.getElementById("confirmModal").style.display = "flex";
+}
+
+function cerrarConfirm(){
+    document.getElementById("confirmModal").style.display = "none";
+}
+
+
+/* =========================================
+   CONFIRMAR ENVÍO
+========================================= */
+function confirmarEnvio(){
+
+    cerrarConfirm();
 
     fetch('/enviar-validacion', { method: 'POST' })
     .then(r => r.json())
@@ -256,6 +294,5 @@ function enviarValidacion() {
 </div>
 
 {% endblock %}
-
 </body>
 </html>
