@@ -467,7 +467,7 @@ def enviar_validacion():
         pagesize=LETTER,
         rightMargin=72,
         leftMargin=72,
-        topMargin=120,   # Ajustado para que no choque con el encabezado del fondo
+        topMargin=120,
         bottomMargin=72
     )
 
