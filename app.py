@@ -1,3 +1,6 @@
+from dotenv import load_dotenv
+load_dotenv()
+
 from flask import (
     Flask, render_template, request, jsonify,
     session, redirect, url_for
@@ -19,12 +22,30 @@ from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
 from reportlab.lib import colors
 from reportlab.lib.units import inch
 
+from supabase import create_client, Client
+
 # --------------------------------------------------
 # APP
 # --------------------------------------------------
 
 app = Flask(__name__)
-app.secret_key = "clave_super_secreta_sna"
+app.secret_key = os.environ.get("FLASK_SECRET_KEY")
+
+# --------------------------------------------------
+# SUPABASE
+# --------------------------------------------------
+
+SUPABASE_URL = os.environ.get("SUPABASE_URL")
+SUPABASE_KEY = os.environ.get("SUPABASE_KEY")
+
+supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
+
+# Dominio ficticio para construir emails a partir del nombre de usuario
+EMAIL_DOMAIN = "sesna.internal"
+
+def usuario_a_email(usuario: str) -> str:
+    """Convierte 'user_ags' → 'user_ags@sna.internal'"""
+    return f"{usuario}@{EMAIL_DOMAIN}"
 
 BASE_DIR = os.getcwd()
 STATIC_DIR = app.static_folder
@@ -71,17 +92,7 @@ def archivo_codigos_estado(estado):
 def archivo_cierre_estado(estado):
     return os.path.join(carpeta_estado(estado), "cerrado.flag")
 
-# --------------------------------------------------
-# USUARIOS
-# --------------------------------------------------
 
-USUARIOS = {
-    "user_ags": {"password": "a", "estado": "Aguascalientes"},
-    "user_bc": {"password": "53301t1UM4q8", "estado": "Baja California"},
-    "user_bcs": {"password": "cX96VSmjy3kZ", "estado": "Baja California Sur"},
-    "user_cdmx": {"password": "64Oydlt7bxwl", "estado": "Ciudad de México"},
-    "user_mex": {"password": "56RnYLD1Xb7C", "estado": "Estado de México"},
-}
 
 # --------------------------------------------------
 # Resultados
@@ -170,26 +181,55 @@ def login():
 
     if request.method == "POST":
 
-        user = request.form.get("usuario")
-        password = request.form.get("password")
+        usuario = request.form.get("usuario", "").strip()
+        password = request.form.get("password", "").strip()
 
-        if user in USUARIOS and USUARIOS[user]["password"] == password:
+        if not usuario or not password:
+            return render_template("login.html", error="Completa todos los campos")
 
-            session["usuario"] = user
-            session["estado"] = USUARIOS[user]["estado"]
+        email = usuario_a_email(usuario)
+
+        try:
+            # Supabase valida las credenciales y regresa un JWT
+            resp = supabase.auth.sign_in_with_password({
+                "email": email,
+                "password": password
+            })
+
+            # Extraer el estado desde los metadatos del usuario
+            user_metadata = resp.user.user_metadata or {}
+            estado = user_metadata.get("estado", "")
+
+            if not estado:
+                return render_template(
+                    "login.html",
+                    error="Este usuario no tiene un estado asignado. Contacta al administrador."
+                )
+
+            # Guardar en session de Flask (igual que antes)
+            session["usuario"] = usuario
+            session["estado"] = estado
+            session["access_token"] = resp.session.access_token
 
             return redirect(url_for("home"))
 
-        return render_template(
-            "login.html",
-            error="Credenciales inválidas"
-        )
+        except Exception as e:
+            # Supabase lanza excepción si las credenciales son inválidas
+            return render_template("login.html", error="Credenciales inválidas")
 
     return render_template("login.html")
 
 
 @app.route("/logout")
 def logout():
+
+    # Cerrar sesión también en Supabase si hay token activo
+    token = session.get("access_token")
+    if token:
+        try:
+            supabase.auth.sign_out()
+        except Exception:
+            pass
 
     session.clear()
 
