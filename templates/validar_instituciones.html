@@ -20,7 +20,6 @@
     <button type="button" data-poder="TODOS" onclick="filtrar('TODOS')">Mostrar todos</button>
 </div>
 
-
 <br>
 
 <form id="formulario-dinamico"></form>
@@ -50,36 +49,11 @@
 <script>
 
 /* =======================
-   CSV PARSER
-======================= */
-function parseCSVLine(line) {
-    const result = [];
-    let current = '';
-    let inQuotes = false;
-
-    for (let i = 0; i < line.length; i++) {
-        const char = line[i];
-        if (char === '"' && line[i + 1] === '"') {
-            current += '"';
-            i++;
-        } else if (char === '"') {
-            inQuotes = !inQuotes;
-        } else if (char === ',' && !inQuotes) {
-            result.push(current);
-            current = '';
-        } else {
-            current += char;
-        }
-    }
-    result.push(current);
-    return result.map(v => v.replace(/^"|"$/g, '').trim());
-}
-
-/* =======================
    ESTADO
 ======================= */
-let encabezados = [];
-let filasOriginales = {};   // id -> columnas
+// filasOriginales guarda objetos planos { id, nombre, poderGobierno }
+// ya no usamos arrays de columnas — Supabase devuelve objetos
+let filasOriginales = {};
 let poderActivo = 'TODOS';
 let hayCambiosPendientes = false;
 
@@ -91,37 +65,42 @@ fetch('/instituciones-base')
     .then(resp => {
 
         const data = resp.data;
-
         if (!data.length) return;
 
-        encabezados = Object.keys(data[0]);
         const formulario = document.getElementById('formulario-dinamico');
 
         data.forEach(fila => {
-            const columnas = encabezados.map(h => fila[h] || '');
-            const id = fila.id;
+            // Normalizar nombres de campo: Supabase usa poder_gobierno,
+            // el catálogo original usa poderGobierno — unificamos aquí
+            const normalizada = {
+                id:            fila.id,
+                nombre:        fila.nombre || '',
+                poderGobierno: fila.poderGobierno || fila.poder_gobierno || '',
+                confirmado:    fila.confirmado || false,
+            };
 
-            filasOriginales[id] = columnas;
-            crearFila(columnas, id, formulario);
+            filasOriginales[normalizada.id] = normalizada;
+            crearFila(normalizada, formulario);
         });
 
         restaurarConfirmados();
         filtrar('TODOS');
         aplicarEstatusCodigos();
     });
+
 /* =======================
    CREAR FILA
 ======================= */
-function crearFila(columnas, id, formulario, esNueva = false) {
-    const idxNombre = encabezados.indexOf('nombre');
-    const idxPoder  = encabezados.indexOf('poderGobierno');
+function crearFila(fila, formulario, esNueva = false) {
 
     const div = document.createElement('div');
     div.className = 'form-group';
-    div.dataset.id = id;
-    div.dataset.poder = columnas[idxPoder];
-    div.dataset.nombre = columnas[idxNombre];
+    div.dataset.id     = fila.id;
+    div.dataset.poder  = fila.poderGobierno;
+    div.dataset.nombre = fila.nombre;
     div.dataset.confirmado = "false";
+
+    const nombreSeguro = fila.nombre.replace(/"/g, '&quot;');
 
     div.innerHTML = `
         <p>
@@ -132,7 +111,7 @@ function crearFila(columnas, id, formulario, esNueva = false) {
         <p>¿Este ente público se encuentra obligado a
         <b>EMITIR</b> un Código de Ética según el Art. 16 de la LGRA?</p>
 
-        <input type="text" value="${columnas[idxNombre] || ''}" ${!esNueva ? 'readonly' : ''}>
+        <input type="text" value="${nombreSeguro}" ${!esNueva ? 'readonly' : ''}>
         <br>
 
         <button type="button">Editar</button>
@@ -143,7 +122,11 @@ function crearFila(columnas, id, formulario, esNueva = false) {
     const [input, btnEditar, btnConfirmar, btnEliminar] =
         div.querySelectorAll('input, button');
 
-    input.oninput = () => hayCambiosPendientes = true;
+    input.oninput = () => {
+        filasOriginales[fila.id].nombre = input.value;
+        div.dataset.nombre = input.value;
+        hayCambiosPendientes = true;
+    };
 
     btnEditar.onclick = () => {
         input.readOnly = false;
@@ -160,7 +143,7 @@ function crearFila(columnas, id, formulario, esNueva = false) {
     };
 
     btnEliminar.onclick = () => {
-        delete filasOriginales[id];
+        delete filasOriginales[fila.id];
         div.remove();
         hayCambiosPendientes = true;
     };
@@ -169,32 +152,27 @@ function crearFila(columnas, id, formulario, esNueva = false) {
 }
 
 /* =======================
-   Agregar Estatus
+   ESTATUS CÓDIGOS
 ======================= */
 function aplicarEstatusCodigos() {
-
     fetch('/estatus-codigos')
         .then(r => r.json())
         .then(lista => {
-
             document.querySelectorAll('.form-group').forEach(div => {
-
                 const nombre = div.dataset.nombre;
-                const nombreNormalizado = nombre
+                const normalizado = nombre
                     .normalize("NFD")
                     .replace(/[\u0300-\u036f]/g, "")
                     .toLowerCase()
                     .replace(/\s+/g, "_");
 
                 const badge = div.querySelector('.badge');
-
-                if (lista.includes(nombreNormalizado)) {
+                if (lista.includes(normalizado)) {
                     badge.textContent = "Código Validado";
                     badge.classList.remove("pendiente");
                     badge.classList.add("validado");
                 }
             });
-
         });
 }
 
@@ -220,26 +198,18 @@ function restaurarConfirmados() {
    FILTRADO
 ======================= */
 function filtrar(poder) {
-
     poderActivo = poder;
 
-    // 🔹 Mostrar / ocultar filas
     document.querySelectorAll('.form-group').forEach(div => {
         div.style.display =
             poder === 'TODOS' || div.dataset.poder === poder
             ? 'block' : 'none';
     });
 
-    // 🔹 Activar botón visualmente (SOLO dentro de #tabs)
     const tabs = document.getElementById('tabs');
-    const botones = tabs.querySelectorAll('button');
-
-    botones.forEach(btn => btn.classList.remove('activo'));
-
+    tabs.querySelectorAll('button').forEach(btn => btn.classList.remove('activo'));
     const botonActivo = tabs.querySelector(`[data-poder="${poder}"]`);
-    if (botonActivo) {
-        botonActivo.classList.add('activo');
-    }
+    if (botonActivo) botonActivo.classList.add('activo');
 }
 
 /* =======================
@@ -251,36 +221,38 @@ function agregarEntrada() {
         return;
     }
 
-    const columnas = Array(encabezados.length).fill('');
-    const idxId = encabezados.indexOf('id');
-    const idxPoder = encabezados.indexOf('poderGobierno');
-
     const nuevoId = 'nuevo_' + Date.now();
-    columnas[idxId] = nuevoId;
-    columnas[idxPoder] = poderActivo;
+    const fila = { id: nuevoId, nombre: '', poderGobierno: poderActivo };
 
-    filasOriginales[nuevoId] = columnas;
-    crearFila(columnas, nuevoId, document.getElementById('formulario-dinamico'), true);
+    filasOriginales[nuevoId] = fila;
+    crearFila(fila, document.getElementById('formulario-dinamico'), true);
     filtrar(poderActivo);
     hayCambiosPendientes = true;
 }
 
 /* =======================
    GUARDAR
+   Ahora enviamos objetos en lugar de arrays de columnas.
+   El backend app.py ya espera esta estructura.
 ======================= */
 function guardarValidacion() {
-    const filas = [];
-    const idxNombre = encabezados.indexOf('nombre');
+
+    const confirmados = [];
 
     document.querySelectorAll('.form-group').forEach(div => {
         if (div.dataset.confirmado !== "true") return;
 
-        const columnas = [...filasOriginales[div.dataset.id]];
-        columnas[idxNombre] = div.querySelector('input').value;
-        filas.push(columnas);
+        const fila = filasOriginales[div.dataset.id];
+        if (!fila) return;
+
+        confirmados.push({
+            id:            fila.id,
+            nombre:        div.querySelector('input').value,
+            poderGobierno: fila.poderGobierno,
+        });
     });
 
-    if (!filas.length) {
+    if (!confirmados.length) {
         alert('No hay registros confirmados');
         return;
     }
@@ -288,12 +260,14 @@ function guardarValidacion() {
     fetch('/guardar-validacion', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ encabezados, filas })
+        body: JSON.stringify({ filas: confirmados })
     })
+    .then(r => r.json())
     .then(() => {
         hayCambiosPendientes = false;
         alert('Información guardada correctamente');
-    });
+    })
+    .catch(() => alert('Error al guardar'));
 }
 
 /* =======================
@@ -319,6 +293,3 @@ function irAValidarCodigos() {
 
 </div>
 {% endblock %}
-
-</body>
-</html>

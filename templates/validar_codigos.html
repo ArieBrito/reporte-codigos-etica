@@ -113,9 +113,10 @@ function actualizarDependencias(card) {
 
 Promise.all([
     fetch('/instituciones-confirmadas').then(r => r.json()),
-    fetch('/estatus-codigos').then(r => r.json())
+    fetch('/estatus-codigos').then(r => r.json()),
+    fetch('/datos-codigos').then(r => r.json())
 ])
-.then(([instituciones, codigosGuardados]) => {
+.then(([instituciones, codigosGuardados, datosCodigos]) => {
 
     const contenedor = document.getElementById('contenedor');
 
@@ -132,6 +133,9 @@ Promise.all([
         const nombreSeguro = nombreOriginal.replace(/"/g, '&quot;');
         const idUnico = normalizar(nombreOriginal);
 
+        // Datos previamente guardados para esta institución (si existen)
+        const guardado = datosCodigos[idUnico] || null;
+
         const div = document.createElement('div');
         div.className = 'card';
         div.dataset.nombre = nombreOriginal;
@@ -142,37 +146,39 @@ Promise.all([
 
             <p>
                 ¿Cuenta con un Código de Ética publicado?<br/>
-                <label><input type="radio" name="cuenta_${idUnico}" value="Sí"> Sí</label>
-                <label><input type="radio" name="cuenta_${idUnico}" value="No"> No</label>
+                <label><input type="radio" name="cuenta_${idUnico}" value="Sí" ${guardado?.cuenta_codigo === 'Sí' ? 'checked' : ''}> Sí</label>
+                <label><input type="radio" name="cuenta_${idUnico}" value="No" ${guardado?.cuenta_codigo === 'No' ? 'checked' : ''}> No</label>
             </p>
 
             <p>
                 Enlace al sitio web oficial<br/>
-                <input type="text" id="link_${idUnico}" placeholder="https://...">
+                <input type="text" id="link_${idUnico}" placeholder="https://..." value="${guardado?.link || ''}">
             </p>
 
             <p>
                 Fecha de publicación<br/>
-                <input type="date" id="fecha_${idUnico}">
+                <input type="date" id="fecha_${idUnico}" value="${guardado?.fecha_publicacion || ''}">
             </p>
 
             <p>
                 ¿El código de ética contempla en sus considerandos o en la fundamentación el ACUERDO por el que se dan a conocer los Lineamientos para la emisión del Código de Ética a que se refiere el artículo 16 de la Ley General de Responsabilidades Administrativas, publicado en el Diario Oficial de la Federación el 12 de octubre de 2018?<br/>
-                <label><input type="radio" name="cumple_${idUnico}" value="Sí"> Sí</label>
-                <label><input type="radio" name="cumple_${idUnico}" value="No"> No</label>
+                <label><input type="radio" name="cumple_${idUnico}" value="Sí" ${guardado?.cumple_lineamientos === 'Sí' ? 'checked' : ''}> Sí</label>
+                <label><input type="radio" name="cumple_${idUnico}" value="No" ${guardado?.cumple_lineamientos === 'No' ? 'checked' : ''}> No</label>
             </p>
 
             <p>
                 Número de instituciones obligadas<br/>
-                <input type="number" id="num_${idUnico}" value="0" min="0">
+                <input type="number" id="num_${idUnico}" value="${guardado?.num_instituciones ?? 0}" min="0">
             </p>
 
             <button onclick="editarCode(this)">Editar</button>
             <button onclick="guardarCode(this)">Guardar</button>
         `;
 
+        // Campos deshabilitados por defecto
         div.querySelectorAll('input').forEach(i => i.disabled = true);
 
+        // Si ya tiene datos guardados, marcar como validado
         if (codigosMap.has(idUnico)) {
             div.classList.add('codigo-validado');
         }
@@ -183,6 +189,11 @@ Promise.all([
                     actualizarDependencias(div);
                 });
             });
+
+        // Si "No" estaba guardado, deshabilitar campos dependientes
+        if (guardado?.cuenta_codigo === 'No') {
+            actualizarDependencias(div);
+        }
 
         contenedor.appendChild(div);
     });

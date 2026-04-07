@@ -5,7 +5,6 @@ from flask import (
     Flask, render_template, request, jsonify,
     session, redirect, url_for
 )
-import csv
 import os
 import unicodedata
 import re
@@ -44,14 +43,10 @@ supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 EMAIL_DOMAIN = "sesna.internal"
 
 def usuario_a_email(usuario: str) -> str:
-    """Convierte 'user_ags' → 'user_ags@sna.internal'"""
     return f"{usuario}@{EMAIL_DOMAIN}"
 
 BASE_DIR = os.getcwd()
 STATIC_DIR = app.static_folder
-
-ESTADOS_DIR = os.path.join(STATIC_DIR, "estados")
-os.makedirs(ESTADOS_DIR, exist_ok=True)
 
 RUTA_FONDO = os.path.join(
     STATIC_DIR,
@@ -77,20 +72,29 @@ def normalizar_texto(txt):
     txt = re.sub(r"\s+", "_", txt)
     return txt.lower()
 
-def carpeta_estado(estado):
-    carpeta = normalizar_texto(estado)
-    ruta = os.path.join(ESTADOS_DIR, carpeta)
-    os.makedirs(ruta, exist_ok=True)
-    return ruta
+def get_supabase_autenticado():
+    """
+    Devuelve un cliente Supabase con la sesión del usuario activo.
+    Refresca el token automáticamente si está próximo a vencer,
+    lo que permite sesiones de larga duración sin re-login.
+    """
+    access_token  = session.get("access_token")
+    refresh_token = session.get("refresh_token")
 
-def archivo_entes_estado(estado):
-    return os.path.join(carpeta_estado(estado), "entes.csv")
+    if not access_token:
+        return None
 
-def archivo_codigos_estado(estado):
-    return os.path.join(carpeta_estado(estado), "codigos.csv")
+    cliente = create_client(SUPABASE_URL, SUPABASE_KEY)
 
-def archivo_cierre_estado(estado):
-    return os.path.join(carpeta_estado(estado), "cerrado.flag")
+    try:
+        resp = cliente.auth.set_session(access_token, refresh_token)
+        if resp.session:
+            session["access_token"]  = resp.session.access_token
+            session["refresh_token"] = resp.session.refresh_token
+    except Exception:
+        pass
+
+    return cliente
 
 
 
@@ -104,58 +108,65 @@ def resultados():
 @app.route("/api/resultados")
 def api_resultados():
 
-    estados = []
+    db = create_client(SUPABASE_URL, SUPABASE_KEY)
+
+    # Traer todos los códigos de ética
+    resp_codigos = db.table("codigos_etica").select(
+        "estado, fecha_publicacion"
+    ).execute()
+
+    # Traer conteo de entes por estado
+    resp_entes = db.table("entes_confirmados").select(
+        "estado"
+    ).eq("confirmado", True).execute()
+
+    codigos = resp_codigos.data or []
+    entes   = resp_entes.data or []
+
+    # Agrupar entes por estado
+    entes_por_estado = {}
+    for e in entes:
+        est = e["estado"]
+        entes_por_estado[est] = entes_por_estado.get(est, 0) + 1
+
+    # Agrupar códigos por estado y año
     codigos_por_estado = {}
-    total_codigos = 0
     años = {}
+    total_codigos = len(codigos)
 
-    for carpeta in os.listdir(ESTADOS_DIR):
+    for c in codigos:
+        est   = c["estado"]
+        fecha = c.get("fecha_publicacion") or ""
 
-        ruta_codigos = os.path.join(ESTADOS_DIR, carpeta, "codigos.csv")
-        ruta_entes = os.path.join(ESTADOS_DIR, carpeta, "entes.csv")
+        codigos_por_estado[est] = codigos_por_estado.get(est, 0) + 1
 
-        if not os.path.exists(ruta_codigos):
-            continue
+        if fecha:
+            año = str(fecha)[:4]
+            años[año] = años.get(año, 0) + 1
 
-        estado_nombre = carpeta.replace("_", " ").title()
+    # Construir tabla de estados
+    todos_estados = set(list(codigos_por_estado.keys()) + list(entes_por_estado.keys()))
+    estados = []
 
-        with open(ruta_codigos, newline="", encoding="utf-8") as f:
-            reader = csv.DictReader(f)
-            lista = list(reader)
-
-        total_estado = len(lista)
-        codigos_por_estado[estado_nombre] = total_estado
-        total_codigos += total_estado
-
-        for r in lista:
-            fecha = r.get("fecha_publicacion", "")
-            if fecha:
-                año = fecha[:4]
-                años[año] = años.get(año, 0) + 1
-
-        total_instituciones = 0
-        if os.path.exists(ruta_entes):
-            with open(ruta_entes) as f:
-                total_instituciones = sum(1 for _ in f) - 1
-
-        porcentaje = 0
-        if total_instituciones > 0:
-            porcentaje = round((total_estado / total_instituciones) * 100, 2)
+    for est in todos_estados:
+        total_inst  = entes_por_estado.get(est, 0)
+        total_cod   = codigos_por_estado.get(est, 0)
+        porcentaje  = round((total_cod / total_inst) * 100, 2) if total_inst > 0 else 0
 
         estados.append({
-            "entidad": estado_nombre,
-            "instituciones": total_instituciones,
-            "porcentaje": porcentaje
+            "entidad":      est,
+            "instituciones": total_inst,
+            "porcentaje":   porcentaje
         })
 
     años_ordenados = sorted(años.items())
 
     return jsonify({
         "total_codigos": total_codigos,
-        "años": [a for a,b in años_ordenados],
-        "valores": [b for a,b in años_ordenados],
-        "mapa": codigos_por_estado,
-        "estados": estados
+        "años":   [a for a, b in años_ordenados],
+        "valores": [b for a, b in años_ordenados],
+        "mapa":   codigos_por_estado,
+        "estados": sorted(estados, key=lambda x: x["entidad"])
     })
 # --------------------------------------------------
 # DECORADOR LOGIN
@@ -209,7 +220,8 @@ def login():
             # Guardar en session de Flask (igual que antes)
             session["usuario"] = usuario
             session["estado"] = estado
-            session["access_token"] = resp.session.access_token
+            session["access_token"]  = resp.session.access_token
+            session["refresh_token"] = resp.session.refresh_token  # para sesiones largas
 
             return redirect(url_for("home"))
 
@@ -255,7 +267,6 @@ def home():
 @app.route("/validar-instituciones")
 @login_required
 def validar_instituciones():
-
     return render_template(
         "validar_instituciones.html",
         usuario=session.get("usuario"),
@@ -268,50 +279,81 @@ def validar_instituciones():
 def instituciones_base():
 
     estado = session["estado"]
-    ruta_guardada = archivo_entes_estado(estado)
+    db = get_supabase_autenticado()
 
-    if os.path.exists(ruta_guardada):
+    # ¿Ya hay entes guardados para este estado?
+    resp_guardados = db.table("entes_confirmados") \
+        .select("*") \
+        .eq("estado", estado) \
+        .execute()
 
-        with open(ruta_guardada, newline="", encoding="utf-8") as f:
+    if resp_guardados.data:
+        return jsonify({
+            "fuente": "guardado",
+            "data": resp_guardados.data
+        })
 
-            return jsonify({
-                "fuente": "guardado",
-                "data": list(csv.DictReader(f))
-            })
+    # Si no hay, traer el catálogo base filtrado por estado
+    resp_base = db.table("instituciones") \
+        .select("*") \
+        .eq("entidad_nombre", estado) \
+        .execute()
 
-    ruta_original = os.path.join(STATIC_DIR, "OICs.csv")
-
-    with open(ruta_original, newline="", encoding="utf-8") as f:
-        filas = list(csv.DictReader(f))
-
-    filtradas = [
-        fila for fila in filas
-        if limpiar(fila.get("entidad.nombre")) == estado
+    # Mapear columnas al formato que espera el frontend
+    data = [
+        {
+            "id":             r["id"],
+            "nombre":         r["nombre"],
+            "poderGobierno":  r["poder_gobierno"],
+            "entidad.nombre": r["entidad_nombre"],
+        }
+        for r in (resp_base.data or [])
     ]
 
-    return jsonify({
-        "fuente": "original",
-        "data": filtradas
-    })
+    return jsonify({"fuente": "original", "data": data})
 
 
 @app.route("/guardar-validacion", methods=["POST"])
 @login_required
 def guardar_validacion():
 
-    if os.path.exists(archivo_cierre_estado(session["estado"])):
+    estado = session["estado"]
+    db = get_supabase_autenticado()
+
+    # Verificar si el proceso está cerrado
+    resp_proceso = db.table("estados_proceso") \
+        .select("cerrado") \
+        .eq("estado", estado) \
+        .execute()
+
+    if resp_proceso.data and resp_proceso.data[0].get("cerrado"):
         return jsonify({"error": "Proceso cerrado"}), 403
 
     data = request.get_json()
 
-    ruta = archivo_entes_estado(session["estado"])
+    # El frontend envía { filas: [{id, nombre, poderGobierno}] }
+    filas = data.get("filas", [])
 
-    with open(ruta, "w", newline="", encoding="utf-8") as f:
+    registros = []
+    for fila in filas:
+        raw_id = fila.get("id")
+        reg = {
+            "estado":         estado,
+            "nombre":         limpiar(fila.get("nombre", "")),
+            "poder_gobierno": limpiar(fila.get("poderGobierno", "")),
+            "confirmado":     True,
+        }
+        try:
+            reg["institucion_id"] = int(raw_id)
+            reg["es_nueva"] = False
+        except (ValueError, TypeError):
+            reg["es_nueva"] = True  # id tipo "nuevo_1234567"
 
-        writer = csv.writer(f, quoting=csv.QUOTE_ALL)
+        registros.append(reg)
 
-        writer.writerow(data["encabezados"])
-        writer.writerows(data["filas"])
+    db.table("entes_confirmados") \
+        .upsert(registros, on_conflict="estado,nombre") \
+        .execute()
 
     return jsonify({"status": "ok"})
 
@@ -320,35 +362,34 @@ def guardar_validacion():
 @login_required
 def hay_entes_confirmados():
 
-    ruta = archivo_entes_estado(session["estado"])
+    estado = session["estado"]
+    db = get_supabase_autenticado()
 
-    if not os.path.exists(ruta):
-        return jsonify({"hay": False})
+    resp = db.table("entes_confirmados") \
+        .select("id") \
+        .eq("estado", estado) \
+        .eq("confirmado", True) \
+        .limit(1) \
+        .execute()
 
-    with open(ruta) as f:
-
-        return jsonify({
-            "hay": sum(1 for _ in f) > 1
-        })
+    return jsonify({"hay": bool(resp.data)})
 
 
 @app.route("/entes-confirmados-nombres")
 @login_required
 def entes_confirmados_nombres():
 
-    ruta = archivo_entes_estado(session["estado"])
+    estado = session["estado"]
+    db = get_supabase_autenticado()
 
-    if not os.path.exists(ruta):
-        return jsonify([])
+    resp = db.table("entes_confirmados") \
+        .select("nombre") \
+        .eq("estado", estado) \
+        .eq("confirmado", True) \
+        .execute()
 
-    with open(ruta, newline="", encoding="utf-8") as f:
+    return jsonify([r["nombre"] for r in (resp.data or [])])
 
-        reader = csv.DictReader(f)
-
-        return jsonify([
-            limpiar(r["nombre"])
-            for r in reader
-        ])
 
 # --------------------------------------------------
 # VALIDACIÓN DE CÓDIGOS
@@ -358,9 +399,17 @@ def entes_confirmados_nombres():
 @login_required
 def validar_codigos():
 
-    ruta = archivo_entes_estado(session["estado"])
+    estado = session["estado"]
+    db = get_supabase_autenticado()
 
-    if not os.path.exists(ruta):
+    resp = db.table("entes_confirmados") \
+        .select("id") \
+        .eq("estado", estado) \
+        .eq("confirmado", True) \
+        .limit(1) \
+        .execute()
+
+    if not resp.data:
         return redirect(url_for("validar_instituciones"))
 
     return render_template(
@@ -369,95 +418,107 @@ def validar_codigos():
         estado=session.get("estado")
     )
 
+@app.route("/datos-codigos")
+@login_required
+def datos_codigos():
+
+    estado = session["estado"]
+    db = get_supabase_autenticado()
+
+    resp = db.table("codigos_etica") \
+        .select("*") \
+        .eq("estado", estado) \
+        .execute()
+
+    # Indexar por nombre normalizado para lookup en el frontend
+    resultado = {}
+    for r in (resp.data or []):
+        clave = normalizar_texto(r["nombre"])
+        resultado[clave] = r
+
+    return jsonify(resultado)
 
 @app.route("/estatus-codigos")
 @login_required
 def estatus_codigos():
 
-    ruta = archivo_codigos_estado(session["estado"])
+    estado = session["estado"]
+    db = get_supabase_autenticado()
 
-    if not os.path.exists(ruta):
-        return jsonify([])
+    resp = db.table("codigos_etica") \
+        .select("nombre") \
+        .eq("estado", estado) \
+        .execute()
 
-    with open(ruta, newline="", encoding="utf-8") as f:
-
-        reader = csv.DictReader(f)
-
-        return jsonify([
-            normalizar_texto(r["nombre"])
-            for r in reader
-        ])
+    return jsonify([
+        normalizar_texto(r["nombre"])
+        for r in (resp.data or [])
+    ])
 
 
 @app.route("/instituciones-confirmadas")
 @login_required
 def instituciones_confirmadas():
 
-    ruta = archivo_entes_estado(session["estado"])
+    estado = session["estado"]
+    db = get_supabase_autenticado()
 
-    if not os.path.exists(ruta):
-        return jsonify([])
+    resp = db.table("entes_confirmados") \
+        .select("*") \
+        .eq("estado", estado) \
+        .eq("confirmado", True) \
+        .execute()
 
-    with open(ruta, newline="", encoding="utf-8") as f:
+    # Mapear al formato que espera el frontend
+    data = [
+        {"nombre": r["nombre"], "poderGobierno": r.get("poder_gobierno")}
+        for r in (resp.data or [])
+    ]
 
-        return jsonify(list(csv.DictReader(f)))
+    return jsonify(data)
 
 
 @app.route("/guardar-validacion-codigos", methods=["POST"])
 @login_required
 def guardar_validacion_codigos():
 
-    if os.path.exists(archivo_cierre_estado(session["estado"])):
+    estado = session["estado"]
+    db = get_supabase_autenticado()
+
+    # Verificar si el proceso está cerrado
+    resp_proceso = db.table("estados_proceso") \
+        .select("cerrado") \
+        .eq("estado", estado) \
+        .execute()
+
+    if resp_proceso.data and resp_proceso.data[0].get("cerrado"):
         return jsonify({"error": "Proceso cerrado"}), 403
 
     data = request.get_json()
 
-    ruta = archivo_codigos_estado(session["estado"])
-
-    encabezados = [
-        "nombre",
-        "cuenta_codigo",
-        "link",
-        "fecha_publicacion",
-        "cumple_lineamientos",
-        "num_instituciones"
-    ]
-
-    registros = {}
-
-    if os.path.exists(ruta):
-
-        with open(ruta, newline="", encoding="utf-8") as f:
-
-            reader = csv.DictReader(f)
-
-            for r in reader:
-
-                registros[normalizar_texto(r["nombre"])] = r
-
+    registros = []
     for fila in data:
+        fecha = limpiar(fila.get("fecha_publicacion")) or None
+        num   = fila.get("num_instituciones")
+        try:
+            num = int(num) if num not in (None, "") else 0
+        except (ValueError, TypeError):
+            num = 0
 
-        clave = normalizar_texto(fila.get("nombre"))
+        registros.append({
+            "estado":               estado,
+            "nombre":               limpiar(fila.get("nombre")),
+            "cuenta_codigo":        limpiar(fila.get("cuenta_codigo")),
+            "link":                 limpiar(fila.get("link")),
+            "fecha_publicacion":    fecha,
+            "cumple_lineamientos":  limpiar(fila.get("cumple_lineamientos")),
+            "num_instituciones":    num,
+        })
 
-        registros[clave] = {
-            "nombre": limpiar(fila.get("nombre")),
-            "cuenta_codigo": limpiar(fila.get("cuenta_codigo")),
-            "link": limpiar(fila.get("link")),
-            "fecha_publicacion": limpiar(fila.get("fecha_publicacion")),
-            "cumple_lineamientos": limpiar(fila.get("cumple_lineamientos")),
-            "num_instituciones": limpiar(fila.get("num_instituciones")),
-        }
-
-    with open(ruta, "w", newline="", encoding="utf-8") as f:
-
-        writer = csv.DictWriter(
-            f,
-            fieldnames=encabezados,
-            quoting=csv.QUOTE_ALL
-        )
-
-        writer.writeheader()
-        writer.writerows(registros.values())
+    # Upsert: clave única es (estado, nombre)
+    db.table("codigos_etica") \
+        .upsert(registros, on_conflict="estado,nombre") \
+        .execute()
 
     return jsonify({"status": "ok"})
 
@@ -470,37 +531,46 @@ def guardar_validacion_codigos():
 def enviar_validacion():
 
     estado = session["estado"]
+    db = get_supabase_autenticado()
 
-    ruta_entes = archivo_entes_estado(estado)
-    ruta_codigos = archivo_codigos_estado(estado)
-    ruta_cierre = archivo_cierre_estado(estado)
+    # --------------------------------------------------
+    # CONTEO DESDE SUPABASE
+    # --------------------------------------------------
+    resp_entes = db.table("entes_confirmados") \
+        .select("nombre") \
+        .eq("estado", estado) \
+        .eq("confirmado", True) \
+        .execute()
 
-    if not os.path.exists(ruta_entes):
+    resp_codigos = db.table("codigos_etica") \
+        .select("nombre") \
+        .eq("estado", estado) \
+        .execute()
+
+    if not resp_entes.data:
         return jsonify({"error": "No hay entes validados"}), 400
 
-    # --------------------------------------------------
-    # CONTEO INSTITUCIONES
-    # --------------------------------------------------
-    with open(ruta_entes, newline="", encoding="utf-8") as f:
-        total_instituciones = sum(1 for _ in f) - 1
-
-    instituciones_validadas = []
-
-    if os.path.exists(ruta_codigos):
-        with open(ruta_codigos, newline="", encoding="utf-8") as f:
-            reader = csv.DictReader(f)
-            for r in reader:
-                nombre = limpiar(r.get("nombre"))
-                if nombre:
-                    instituciones_validadas.append(nombre)
-
+    total_instituciones = len(resp_entes.data)
+    instituciones_validadas = [r["nombre"] for r in (resp_codigos.data or [])]
     total_codigos = len(instituciones_validadas)
+
+    # --------------------------------------------------
+    # MARCAR COMO CERRADO EN SUPABASE
+    # --------------------------------------------------
+    db.table("estados_proceso").upsert({
+        "estado":     estado,
+        "cerrado":    True,
+        "cerrado_en": datetime.now().isoformat()
+    }).execute()
 
     # --------------------------------------------------
     # CREAR PDF CON PLATYPUS + FONDO
     # --------------------------------------------------
     nombre_pdf = f"acuse_codigos_etica_{normalizar_texto(estado)}.pdf"
-    ruta_pdf = os.path.join(carpeta_estado(estado), nombre_pdf)
+    # Guardar en static/acuses/ en lugar de la carpeta de estados
+    acuses_dir = os.path.join(STATIC_DIR, "acuses")
+    os.makedirs(acuses_dir, exist_ok=True)
+    ruta_pdf = os.path.join(acuses_dir, nombre_pdf)
 
     doc = SimpleDocTemplate(
         ruta_pdf,
@@ -605,17 +675,11 @@ def enviar_validacion():
         onLaterPages=dibujar_fondo
     )
 
-    # --------------------------------------------------
-    # MARCAR COMO CERRADO
-    # --------------------------------------------------
-    with open(ruta_cierre, "w") as f:
-        f.write("CERRADO")
-
     return jsonify({
         "status": "ok",
         "pdf": url_for(
             "static",
-            filename=f"estados/{normalizar_texto(estado)}/{nombre_pdf}"
+            filename=f"acuses/{nombre_pdf}"
         )
     })
 
