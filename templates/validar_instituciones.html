@@ -9,7 +9,7 @@
 <div class="inst-container">
 
 <h1>Reporte de Códigos de Ética</h1>
-<h2>1. Validación de Entes Públicos</h2>
+<h2>1. Verificación de Entes Públicos</h2>
 
 <div id="tabs">
     <button type="button" data-poder="Ejecutivo" onclick="filtrar('Ejecutivo')">Poder Ejecutivo</button>
@@ -38,12 +38,12 @@
 </button>
 
 <button type="button" onclick="guardarValidacion()" class="btn-guardar">
-    Guardar validación
+    Guardar verificación
     <img src="{{ url_for('static', filename='assets/icons/save.svg')}}">
 </button>
 
 <button type="button" onclick="irAValidarCodigos()" class="btn-validar">
-    Validar Códigos de Ética
+    Verificar Códigos de Ética
     <img src="{{ url_for('static', filename='assets/icons/arrow_forward.svg')}}">
 </button>
 
@@ -126,7 +126,7 @@ function crearFila(columnas, id, formulario, esNueva = false) {
     div.innerHTML = `
         <p>
             <strong>Estatus:</strong>
-            <span class="badge pendiente">Pendiente de validación</span>
+            <span class="badge pendiente">Pendiente de verificación</span>
         </p>
 
         <p>¿Este ente público se encuentra obligado a
@@ -292,7 +292,7 @@ function guardarValidacion() {
     })
     .then(() => {
         hayCambiosPendientes = false;
-        alert('Validación guardada correctamente');
+        alert('Información guardada correctamente');
     });
 }
 
@@ -301,7 +301,7 @@ function guardarValidacion() {
 ======================= */
 function irAValidarCodigos() {
     if (hayCambiosPendientes) {
-        alert('Guarda la validación antes de continuar');
+        alert('Guarda la información antes de continuar');
         return;
     }
 

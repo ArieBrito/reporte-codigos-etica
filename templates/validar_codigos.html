@@ -9,14 +9,14 @@
 <div class="codigos-container">
 
 <h1 class="title">Reporte de Códigos de Ética</h1>
-<h2>2. Validación de códigos de ética</h2>
+<h2>2. Verifiación de códigos de ética</h2>
 
 <div id="contenedor"></div>
 
 <br>
 
 <button type="button" onclick="window.location.href='/validar-instituciones'">
-← Volver a validación de Entes Públicos
+← Volver a verificación de Entes Públicos
 </button>
 
 <button onclick="enviarValidacion()">
@@ -238,14 +238,14 @@ function guardarCode(btn) {
     .then(r => r.json())
     .then(() => {
 
-        alert('Código de Ética guardado correctamente');
+        alert('Información guardada correctamente');
 
         card.querySelectorAll('input').forEach(i => i.disabled = true);
 
         card.classList.add('codigo-validado');
     })
     .catch(() => {
-        alert('No se pudo guardar el código');
+        alert('No se pudo guardar la información');
     });
 }
 
