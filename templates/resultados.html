@@ -7,233 +7,392 @@
 <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css"/>
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 
 <div class="dashboard">
 
-<h1>Dashboard de Códigos de Ética</h1>
+    <div class="dashboard-header">
+        <h1>Dashboard de Códigos de Ética</h1>
+        <span id="indicador-live" class="live-badge">● EN VIVO</span>
+    </div>
 
-<div class="cards">
+    <div class="cards">
+        <div class="card-metric">
+            <h3>Total de códigos registrados</h3>
+            <p id="totalCodigos">—</p>
+        </div>
+        <div class="card-metric">
+            <h3>Entidades con avance</h3>
+            <p id="totalEntidades">—</p>
+        </div>
+        <div class="card-metric">
+            <h3>Promedio de avance</h3>
+            <p id="promedioAvance">—</p>
+        </div>
+    </div>
 
-<div class="card-metric">
-<h3>Total de códigos registrados</h3>
-<p id="totalCodigos">0</p>
+    <div class="grid">
+        <div class="panel">
+            <h3>Códigos acumulados por año</h3>
+            <canvas id="graficoLinea"></canvas>
+        </div>
+        <div class="panel">
+            <h3>Códigos por entidad</h3>
+            <div id="mapa"></div>
+        </div>
+    </div>
+
+    <div class="panel">
+        <h3>Resumen por entidad</h3>
+        <table id="tablaEstados">
+            <!-- thead -->
+            <thead>
+                <tr>
+                    <th>Entidad</th>
+                    <th>Instituciones que emiten Códigos</th>
+                    <th>Códigos con liga registrada</th>
+                    <th>Instituciones obligadas</th>
+                </tr>
+            </thead>
+            <tbody></tbody>
+        </table>
+    </div>
+
 </div>
-
-</div>
-
-<div class="grid">
-
-<div class="panel">
-<h3>Códigos acumulados por año</h3>
-<canvas id="graficoLinea"></canvas>
-</div>
-
-<div class="panel">
-<h3>Códigos por entidad</h3>
-<div id="mapa"></div>
-</div>
-
-</div>
-
-<div class="panel">
-
-<h3>Resumen por entidad</h3>
-
-<table id="tablaEstados">
-
-<thead>
-<tr>
-<th>Entidad</th>
-<th>Total instituciones</th>
-<th>% con código</th>
-<th>Observaciones</th>
-</tr>
-</thead>
-
-<tbody></tbody>
-
-</table>
-
-</div>
-
-</div>
-
 
 <script>
 
-document.addEventListener("DOMContentLoaded", async function(){
+// ======================================================
+// CLIENTE SUPABASE (solo lectura — anon key)
+// ======================================================
+const SUPABASE_URL = "{{ supabase_url }}";
+const SUPABASE_KEY = "{{ supabase_key }}";
+const sb = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 
-const resp = await fetch("/api/resultados")
-const datos = await resp.json()
+// ======================================================
+// ESTADO GLOBAL
+// ======================================================
+let grafico = null;
+let mapaLeaflet = null;
+let geojsonLayer = null;
 
+// ======================================================
+// RENDERIZADO
+// ======================================================
 
-// ====================
-// TOTAL
-// ====================
+function renderizarMetricas(datos) {
+    document.getElementById("totalCodigos").textContent = datos.total_codigos;
+    document.getElementById("totalEntidades").textContent = datos.estados.length;
 
-document.getElementById("totalCodigos").textContent =
-datos.total_codigos
-
-
-// ====================
-// GRÁFICO
-// ====================
-
-new Chart(
-document.getElementById("graficoLinea"),
-{
-type:"line",
-
-data:{
-labels:datos.años,
-datasets:[{
-label:"Códigos publicados",
-data:datos.valores,
-tension:0.3
-}]
-},
-
-options:{responsive:true}
-}
-)
-
-
-// ====================
-// TABLA
-// ====================
-
-const tbody = document.querySelector("#tablaEstados tbody")
-
-datos.estados.forEach(e=>{
-
-const tr = document.createElement("tr")
-
-tr.innerHTML = `
-<td>${e.entidad}</td>
-<td>${e.instituciones}</td>
-<td>${e.porcentaje}%</td>
-<td></td>
-`
-
-tbody.appendChild(tr)
-
-})
-
-
-// ====================
-// MAPA
-// ====================
-
-const mapa = L.map("mapa").setView([23.5,-102],5)
-
-L.tileLayer(
-'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png'
-).addTo(mapa)
-
-
-const geo = await fetch("/static/estados_mexico.json")
-const geojson = await geo.json()
-
-
-function estilo(feature){
-
-const estado = feature.properties.name
-const valor = datos.mapa[estado] || 0
-
-return{
-
-fillColor: valor > 10 ? '#5c2335' :
-valor > 5 ? '#755472' :
-valor > 0 ? '#a8163d' :
-'#ccc',
-
-weight:1,
-color:'white',
-fillOpacity:0.7
-
+    const promedios = datos.estados.map(e => e.porcentaje).filter(p => p > 0);
+    const promedio  = promedios.length
+        ? (promedios.reduce((a, b) => a + b, 0) / promedios.length).toFixed(1)
+        : 0;
+    document.getElementById("promedioAvance").textContent = promedio + "%";
 }
 
+function renderizarGrafico(datos) {
+    const ctx = document.getElementById("graficoLinea");
+
+    if (grafico) {
+        grafico.data.labels   = datos.años;
+        grafico.data.datasets[0].data = datos.valores;
+        grafico.update("active");
+        return;
+    }
+
+    grafico = new Chart(ctx, {
+        type: "line",
+        data: {
+            labels: datos.años,
+            datasets: [{
+                label: "Códigos publicados",
+                data:  datos.valores,
+                tension: 0.3,
+                borderColor: "#9B2247",
+                backgroundColor: "rgba(155,34,71,0.1)",
+                fill: true,
+                pointRadius: 5,
+                pointBackgroundColor: "#9B2247"
+            }]
+        },
+        options: {
+            responsive: true,
+            plugins: { legend: { display: false } },
+            scales: {
+                y: { beginAtZero: true, ticks: { stepSize: 1 } }
+            }
+        }
+    });
 }
 
+function renderizarTabla(datos) {
+    const tbody = document.querySelector("#tablaEstados tbody");
+    tbody.innerHTML = "";
 
-function onEachFeature(feature, layer){
-
-const estado = feature.properties.name
-const valor = datos.mapa[estado] || 0
-
-layer.bindTooltip(
-`${estado}<br>Códigos registrados: ${valor}`
-)
-
+    datos.estados.forEach(e => {
+        const tr = document.createElement("tr");
+        tr.innerHTML = `
+            <td>${e.entidad}</td>
+            <td>${e.instituciones}</td>
+            <td>${e.codigos_con_link}</td>
+            <td>${e.num_obligadas}</td>
+        `;
+        tbody.appendChild(tr);
+    });
 }
 
+function renderizarMapa(datos) {
+    if (!mapaLeaflet) {
+        mapaLeaflet = L.map("mapa").setView([23.5, -102], 5);
+        L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png").addTo(mapaLeaflet);
+    }
 
-L.geoJson(
-geojson,
-{
-style:estilo,
-onEachFeature:onEachFeature
+    if (geojsonLayer) {
+        mapaLeaflet.removeLayer(geojsonLayer);
+    }
+
+    // Usar instituciones que emiten códigos (no solo con liga)
+    // para colorear el mapa — más representativo del avance real
+    const mapaInstituciones = {};
+    datos.estados.forEach(e => {
+        mapaInstituciones[e.entidad] = e.instituciones;
+    });
+
+    const NOMBRE_MAP = {
+        "México": "Estado de México",
+    };
+
+    // Escala proporcional al máximo real
+    const valores = Object.values(mapaInstituciones).filter(v => v > 0);
+    const maxValor = valores.length ? Math.max(...valores) : 1;
+
+    function getColor(valor) {
+        if (valor === 0) return "#e0e0e0";
+        const pct = valor / maxValor;
+        if (pct > 0.75) return "#5c2335";
+        if (pct > 0.50) return "#7d2d4a";
+        if (pct > 0.25) return "#a8163d";
+        return "#c85a7a";
+    }
+
+    fetch("/static/estados_mexico.json")
+        .then(r => r.json())
+        .then(geojson => {
+
+            function nombreBD(nombreGeo) {
+                return NOMBRE_MAP[nombreGeo] || nombreGeo;
+            }
+
+            function estilo(feature) {
+                const bd    = nombreBD(feature.properties.name);
+                const valor = mapaInstituciones[bd] || 0;
+                return {
+                    fillColor:   getColor(valor),
+                    weight:      1,
+                    color:       "white",
+                    fillOpacity: 0.8
+                };
+            }
+
+            function onEachFeature(feature, layer) {
+                const bd            = nombreBD(feature.properties.name);
+                const instituciones = mapaInstituciones[bd] || 0;
+                const conLiga       = datos.mapa[bd] || 0;
+                layer.bindTooltip(`
+                    <b>${feature.properties.name}</b><br>
+                    Instituciones con código: ${instituciones}<br>
+                    Con liga registrada: ${conLiga}
+                `);
+            }
+
+            geojsonLayer = L.geoJson(geojson, {
+                style:         estilo,
+                onEachFeature: onEachFeature
+            }).addTo(mapaLeaflet);
+        });
 }
-).addTo(mapa)
 
-})
+function actualizarDashboard(datos) {
+    renderizarMetricas(datos);
+    renderizarGrafico(datos);
+    renderizarTabla(datos);
+    renderizarMapa(datos);
+}
+
+// ======================================================
+// CARGA INICIAL
+// ======================================================
+
+async function cargarDatos() {
+    const resp  = await fetch("/api/resultados");
+    const datos = await resp.json();
+    actualizarDashboard(datos);
+}
+
+// ======================================================
+// REALTIME — Supabase WebSocket
+// Escucha cambios en codigos_etica y entes_confirmados.
+// Cuando llega cualquier cambio, recarga los datos desde
+// el endpoint /api/resultados y actualiza el dashboard.
+// ======================================================
+
+function iniciarRealtime() {
+    sb.channel("dashboard")
+        .on("postgres_changes",
+            { event: "*", schema: "public", table: "codigos_etica" },
+            () => cargarDatos()
+        )
+        .on("postgres_changes",
+            { event: "*", schema: "public", table: "entes_confirmados" },
+            () => cargarDatos()
+        )
+        .subscribe(status => {
+            const badge = document.getElementById("indicador-live");
+            if (status === "SUBSCRIBED") {
+                badge.classList.add("conectado");
+                badge.textContent = "● EN VIVO";
+            } else {
+                badge.classList.remove("conectado");
+                badge.textContent = "○ Reconectando...";
+            }
+        });
+}
+
+// ======================================================
+// INICIO
+// ======================================================
+
+document.addEventListener("DOMContentLoaded", () => {
+    cargarDatos();
+    iniciarRealtime();
+});
 
 </script>
 
-
 <style>
 
-.dashboard{
-max-width:1400px;
-margin:auto;
-padding:40px;
+.dashboard {
+    max-width: 1400px;
+    margin: auto;
+    padding: 40px;
 }
 
-.cards{
-display:flex;
-gap:20px;
-margin-bottom:30px;
+.dashboard-header {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    margin-bottom: 30px;
 }
 
-.card-metric{
-background:white;
-padding:30px;
-border-radius:12px;
-box-shadow:0 4px 12px rgba(0,0,0,0.1);
+.dashboard-header h1 {
+    margin: 0;
 }
 
-.card-metric p{
-font-size:40px;
-font-weight:bold;
+.live-badge {
+    font-size: 12px;
+    font-weight: 700;
+    padding: 4px 10px;
+    border-radius: 20px;
+    background: #e0e0e0;
+    color: #999;
+    letter-spacing: 0.5px;
+    transition: all 0.3s;
 }
 
-.grid{
-display:grid;
-grid-template-columns:1fr 1fr;
-gap:30px;
-margin-bottom:30px;
+.live-badge.conectado {
+    background: #d4edda;
+    color: #1a6b35;
 }
 
-.panel{
-background:white;
-padding:25px;
-border-radius:12px;
-box-shadow:0 4px 12px rgba(0,0,0,0.1);
+.cards {
+    display: flex;
+    gap: 20px;
+    margin-bottom: 30px;
 }
 
-#mapa{
-height:400px;
+.card-metric {
+    flex: 1;
+    background: white;
+    padding: 30px;
+    border-radius: 12px;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.08);
 }
 
-table{
-width:100%;
-border-collapse:collapse;
+.card-metric h3 {
+    margin: 0 0 12px;
+    font-size: 14px;
+    color: #666;
+    font-weight: 500;
 }
 
-th,td{
-padding:10px;
-border-bottom:1px solid #ddd;
-text-align:left;
+.card-metric p {
+    margin: 0;
+    font-size: 40px;
+    font-weight: 700;
+    color: #9B2247;
+}
+
+.grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 30px;
+    margin-bottom: 30px;
+}
+
+.panel {
+    background: white;
+    padding: 25px;
+    border-radius: 12px;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.08);
+}
+
+.panel h3 {
+    margin: 0 0 20px;
+    font-size: 15px;
+    color: #333;
+}
+
+#mapa { height: 400px; }
+
+table {
+    width: 100%;
+    border-collapse: collapse;
+}
+
+th {
+    padding: 10px;
+    border-bottom: 2px solid #eee;
+    text-align: left;
+    font-size: 13px;
+    color: #666;
+    font-weight: 600;
+}
+
+td {
+    padding: 10px;
+    border-bottom: 1px solid #f0f0f0;
+    font-size: 14px;
+}
+
+.barra-container {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.barra-fill {
+    height: 8px;
+    background: #9B2247;
+    border-radius: 4px;
+    min-width: 2px;
+    transition: width 0.5s ease;
+}
+
+.barra-container span {
+    font-size: 13px;
+    color: #555;
+    white-space: nowrap;
 }
 
 </style>
