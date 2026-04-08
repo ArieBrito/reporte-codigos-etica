@@ -49,6 +49,7 @@
         <table id="tablaEstados">
             <thead>
                 <tr>
+                    <th></th>
                     <th>Entidad</th>
                     <th>Instituciones que emiten Códigos</th>
                     <th>Códigos con liga registrada</th>
@@ -132,15 +133,60 @@ function renderizarTabla(datos) {
     tbody.innerHTML = "";
 
     datos.estados.forEach(e => {
+        const idEstado = e.entidad.replace(/\s+/g, "_");
+
+        // Fila principal del estado
         const tr = document.createElement("tr");
+        tr.className = "fila-estado";
         tr.innerHTML = `
-            <td>${e.entidad}</td>
+            <td>
+                <button class="btn-expandir" onclick="toggleDetalle('${idEstado}')">▶</button>
+            </td>
+            <td><strong>${e.entidad}</strong></td>
             <td>${e.instituciones}</td>
             <td>${e.codigos_con_link}</td>
             <td>${e.num_obligadas}</td>
         `;
         tbody.appendChild(tr);
+
+        // Fila de detalle (oculta inicialmente)
+        const trDetalle = document.createElement("tr");
+        trDetalle.id = `detalle_${idEstado}`;
+        trDetalle.style.display = "none";
+        trDetalle.innerHTML = `
+            <td colspan="5" style="padding: 0;">
+                <table class="tabla-detalle">
+                    <thead>
+                        <tr>
+                            <th>Institución</th>
+                            <th>¿Cuenta con código?</th>
+                            <th>Liga</th>
+                            <th>Fecha de publicación</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${e.detalle.map(inst => `
+                            <tr>
+                                <td>${inst.nombre}</td>
+                                <td>${inst.cuenta || '—'}</td>
+                                <td>${inst.link ? `<a href="${inst.link}" target="_blank">Ver enlace</a>` : '—'}</td>
+                                <td>${inst.fecha || '—'}</td>
+                            </tr>
+                        `).join('')}
+                    </tbody>
+                </table>
+            </td>
+        `;
+        tbody.appendChild(trDetalle);
     });
+}
+
+function toggleDetalle(idEstado) {
+    const fila = document.getElementById(`detalle_${idEstado}`);
+    const btn  = fila.previousElementSibling.querySelector('.btn-expandir');
+    const visible = fila.style.display !== "none";
+    fila.style.display = visible ? "none" : "table-row";
+    btn.textContent = visible ? "▶" : "▼";
 }
 
 async function renderizarMapa(datos) {
@@ -387,6 +433,53 @@ td {
     padding: 10px;
     border-bottom: 1px solid #f0f0f0;
     font-size: 14px;
+}
+
+.btn-expandir {
+    background: none;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    cursor: pointer;
+    padding: 2px 6px;
+    font-size: 11px;
+    color: #666;
+    transition: 0.2s;
+}
+
+.btn-expandir:hover {
+    background: #f0f0f0;
+}
+
+.fila-estado {
+    cursor: pointer;
+}
+
+.tabla-detalle {
+    width: 100%;
+    border-collapse: collapse;
+    background: #fafafa;
+}
+
+.tabla-detalle th {
+    background: #f5f5f5;
+    font-size: 12px;
+    padding: 8px 12px;
+    border-bottom: 1px solid #eee;
+}
+
+.tabla-detalle td {
+    padding: 8px 12px;
+    font-size: 13px;
+    border-bottom: 1px solid #f0f0f0;
+}
+
+.tabla-detalle a {
+    color: #9B2247;
+    text-decoration: none;
+}
+
+.tabla-detalle a:hover {
+    text-decoration: underline;
 }
 
 </style>

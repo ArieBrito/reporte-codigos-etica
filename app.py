@@ -121,14 +121,17 @@ def resultados():
 def api_resultados():
     db = create_client(SUPABASE_URL, SUPABASE_KEY)
 
-    codigos = db.table("codigos_etica").select("estado, fecha_publicacion, link, num_instituciones, cuenta_codigo").execute().data or []
-    entes   = db.table("entes_confirmados").select("estado").eq("confirmado", True).execute().data or []
+    codigos = db.table("codigos_etica").select(
+        "estado, fecha_publicacion, link, num_instituciones, cuenta_codigo, nombre"
+    ).execute().data or []
+    entes = db.table("entes_confirmados").select("estado").eq("confirmado", True).execute().data or []
 
     entes_por_estado   = {}
     codigos_por_estado = {}
     codigos_con_link   = {}
     codigos_con_si     = {}
     num_obligadas      = {}
+    instituciones_por_estado = {}  # ← nuevo
     años = {}
 
     for e in entes:
@@ -141,6 +144,7 @@ def api_resultados():
         link   = c.get("link") or ""
         num    = c.get("num_instituciones") or 0
         cuenta = c.get("cuenta_codigo") or ""
+        nombre = c.get("nombre") or ""
 
         codigos_por_estado[est] = codigos_por_estado.get(est, 0) + 1
 
@@ -159,6 +163,16 @@ def api_resultados():
             año = str(fecha)[:4]
             años[año] = años.get(año, 0) + 1
 
+        # Guardar institución con su estatus
+        if est not in instituciones_por_estado:
+            instituciones_por_estado[est] = []
+        instituciones_por_estado[est].append({
+            "nombre":  nombre,
+            "cuenta":  cuenta,
+            "link":    link,
+            "fecha":   fecha,
+        })
+
     todos_estados  = set(codigos_por_estado) | set(entes_por_estado)
     años_ordenados = sorted(años.items())
 
@@ -169,6 +183,10 @@ def api_resultados():
             "codigos_con_link": codigos_con_link.get(est, 0),
             "codigos_con_si":   codigos_con_si.get(est, 0),
             "num_obligadas":    num_obligadas.get(est, 0),
+            "detalle":          sorted(
+                instituciones_por_estado.get(est, []),
+                key=lambda x: x["nombre"]
+            ),
         }
         for est in todos_estados
     ], key=lambda x: x["entidad"])
