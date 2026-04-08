@@ -41,6 +41,11 @@
     <img src="{{ url_for('static', filename='assets/icons/save.svg')}}">
 </button>
 
+<button type="button" onclick="descargarInstituciones()" class="btn-guardar">
+    Descargar instituciones guardadas
+    <img src="{{ url_for('static', filename='assets/icons/arrow_back.svg')}}">
+</button>
+
 <button type="button" onclick="irAValidarCodigos()" class="btn-validar">
     Verificar Códigos de Ética
     <img src="{{ url_for('static', filename='assets/icons/arrow_forward.svg')}}">
@@ -311,6 +316,47 @@ function irAValidarCodigos() {
             window.location.href = '/validar-codigos';
         });
 }
+
+/* =======================
+   DESCARGAR CSV
+======================= */
+function descargarInstituciones() {
+    fetch('/instituciones-base')
+        .then(r => r.json())
+        .then(resp => {
+            const data = resp.data;
+            if (!data.length) {
+                alert('No hay instituciones guardadas');
+                return;
+            }
+
+            const encabezado = ["Nombre", "Poder de Gobierno", "Confirmado"];
+            const filas = data.map(fila => [
+                fila.nombre        || fila.nombre        || "",
+                fila.poder_gobierno || fila.poderGobierno || "",
+                fila.confirmado ? "Sí" : "No"
+            ]);
+
+            const BOM      = "\uFEFF";
+            const contenido = BOM + [encabezado, ...filas]
+                .map(fila => fila
+                    .map(celda => `"${String(celda).replace(/"/g, '""')}"`)
+                    .join(","))
+                .join("\n");
+
+            const blob = new Blob([contenido], { type: "text/csv;charset=utf-8;" });
+            const url  = URL.createObjectURL(blob);
+            const a    = document.createElement("a");
+            a.href     = url;
+            a.download = "instituciones_verificadas.csv";
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+        })
+        .catch(() => alert('Error al descargar'));
+}
+
 </script>
 
 </div>

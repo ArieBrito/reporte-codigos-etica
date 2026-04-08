@@ -23,6 +23,10 @@
 Enviar información
 </button>
 
+<button type="button" onclick="descargarCodigos()">
+Descargar información
+</button>
+
 
 <!-- ================================
 MODAL DE CONFIRMACIÓN
@@ -206,6 +210,52 @@ Promise.all([
     console.error(err);
 });
 
+
+/* =========================================
+   DESCARGAR CSV
+========================================= */
+function descargarCodigos() {
+    fetch('/datos-codigos')
+        .then(r => r.json())
+        .then(datos => {
+            const keys = Object.keys(datos);
+            if (!keys.length) { alert('No hay información guardada'); return; }
+
+            const encabezado = [
+                "Institución",
+                "¿Cuenta con código?",
+                "Liga de publicación",
+                "Fecha de publicación",
+                "¿Cumple lineamientos?",
+                "Núm. instituciones obligadas"
+            ];
+
+            const filas = keys.map(k => {
+                const d = datos[k];
+                return [
+                    d.nombre               || "",
+                    d.cuenta_codigo        || "",
+                    d.link                 || "",
+                    d.fecha_publicacion    || "",
+                    d.cumple_lineamientos  || "",
+                    d.num_instituciones    ?? ""
+                ];
+            });
+
+            const BOM = "\uFEFF";
+            const contenido = BOM + [encabezado, ...filas]
+                .map(fila => fila.map(c => `"${String(c).replace(/"/g, '""')}"`).join(","))
+                .join("\n");
+
+            const blob = new Blob([contenido], { type: "text/csv;charset=utf-8;" });
+            const url  = URL.createObjectURL(blob);
+            const a    = document.createElement("a");
+            a.href = url; a.download = "codigos_etica_cotejo.csv";
+            document.body.appendChild(a); a.click();
+            document.body.removeChild(a); URL.revokeObjectURL(url);
+        })
+        .catch(() => alert("Error al descargar"));
+}
 
 /* =========================================
    EDITAR
