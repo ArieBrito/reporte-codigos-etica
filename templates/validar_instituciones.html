@@ -51,8 +51,6 @@
 /* =======================
    ESTADO
 ======================= */
-// filasOriginales guarda objetos planos { id, nombre, poderGobierno }
-// ya no usamos arrays de columnas — Supabase devuelve objetos
 let filasOriginales = {};
 let poderActivo = 'TODOS';
 let hayCambiosPendientes = false;
@@ -70,8 +68,6 @@ fetch('/instituciones-base')
         const formulario = document.getElementById('formulario-dinamico');
 
         data.forEach(fila => {
-            // Normalizar nombres de campo: Supabase usa poder_gobierno,
-            // el catálogo original usa poderGobierno — unificamos aquí
             const normalizada = {
                 id:            fila.id,
                 nombre:        fila.nombre || '',
@@ -191,6 +187,34 @@ function restaurarConfirmados() {
                 }
             });
             hayCambiosPendientes = false;
+        })
+        .then(() => verificarCierre());
+}
+
+/* =======================
+   VERIFICAR CIERRE
+======================= */
+function verificarCierre() {
+    fetch('/proceso-cerrado')
+        .then(r => r.json())
+        .then(resp => {
+            if (!resp.cerrado) return;
+
+            // Deshabilitar inputs y botones dentro de las tarjetas
+            document.querySelectorAll('.form-group input').forEach(i => i.disabled = true);
+            document.querySelectorAll('.form-group button').forEach(b => b.disabled = true);
+
+            // Deshabilitar botones de acción, excepto "Volver al inicio"
+            document.querySelectorAll('button').forEach(b => {
+                if (b.textContent.trim().startsWith('Volver')) return;
+                b.disabled = true;
+            });
+
+            // Mostrar aviso
+            const aviso = document.createElement('div');
+            aviso.className = 'aviso-cerrado';
+            aviso.textContent = '⚠ Este proceso ya fue enviado y está cerrado. No es posible realizar modificaciones.';
+            document.querySelector('.inst-container').prepend(aviso);
         });
 }
 
@@ -232,8 +256,6 @@ function agregarEntrada() {
 
 /* =======================
    GUARDAR
-   Ahora enviamos objetos en lugar de arrays de columnas.
-   El backend app.py ya espera esta estructura.
 ======================= */
 function guardarValidacion() {
 

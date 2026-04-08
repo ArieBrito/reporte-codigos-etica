@@ -755,3 +755,14 @@ background:#fafafa;
     font-weight:bold;
     cursor:pointer;
 }
+
+.aviso-cerrado {
+    background: #fdecea;
+    border-left: 4px solid #b42318;
+    color: #b42318;
+    padding: 14px 20px;
+    border-radius: 6px;
+    font-size: 14px;
+    font-weight: 600;
+    margin-bottom: 24px;
+}
