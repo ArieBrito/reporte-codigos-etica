@@ -291,7 +291,7 @@ def home():
     )
 
 # --------------------------------------------------
-# VALIDACIÓN DE INSTITUCIONES
+# VERIFICACIÓN DE INSTITUCIONES
 # --------------------------------------------------
 
 @app.route("/validar-instituciones")
@@ -343,9 +343,9 @@ def instituciones_base():
     return jsonify({"fuente": "original", "data": data})
 
 
-@app.route("/guardar-validacion", methods=["POST"])
+@app.route("/guardar-verificacion", methods=["POST"])
 @login_required
-def guardar_validacion():
+def guardar_verificacion():
 
     estado = session["estado"]
     db = get_supabase_autenticado()
@@ -422,7 +422,7 @@ def entes_confirmados_nombres():
 
 
 # --------------------------------------------------
-# VALIDACIÓN DE CÓDIGOS
+# VERIFICACIÓN DE CÓDIGOS
 # --------------------------------------------------
 
 @app.route("/validar-codigos")
@@ -508,9 +508,9 @@ def instituciones_confirmadas():
     return jsonify(data)
 
 
-@app.route("/guardar-validacion-codigos", methods=["POST"])
+@app.route("/guardar-verificacion-codigos", methods=["POST"])
 @login_required
-def guardar_validacion_codigos():
+def guardar_verificacion_codigos():
 
     estado = session["estado"]
     db = get_supabase_autenticado()
@@ -556,9 +556,9 @@ def guardar_validacion_codigos():
 # ENVÍO FINAL + PDF
 # --------------------------------------------------
 
-@app.route("/enviar-validacion", methods=["POST"])
+@app.route("/enviar-verificacion", methods=["POST"])
 @login_required
-def enviar_validacion():
+def enviar_verificacion():
 
     estado = session["estado"]
     db = get_supabase_autenticado()

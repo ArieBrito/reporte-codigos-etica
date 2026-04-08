@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 
-{% block title %}Validación de códigos{% endblock %}
+{% block title %}Verificación de códigos{% endblock %}
 
 {% block body_class %}codigos-body{% endblock %}
 
@@ -19,7 +19,7 @@
 ← Volver a verificación de Entes Públicos
 </button>
 
-<button onclick="enviarValidacion()">
+<button onclick="enviarVerificacion()">
 Enviar información
 </button>
 
@@ -294,7 +294,7 @@ function guardarCode(btn) {
         num_instituciones: num
     }];
 
-    fetch('/guardar-validacion-codigos', {
+    fetch('/guardar-verificacion-codigos', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload)
@@ -317,7 +317,7 @@ function guardarCode(btn) {
 /* =========================================
    ABRIR MODAL
 ========================================= */
-function enviarValidacion(){
+function enviarVerificacion(){
     document.getElementById("confirmModal").style.display = "flex";
 }
 
@@ -332,7 +332,7 @@ function cerrarConfirm(){
 function confirmarEnvio(){
     cerrarConfirm();
 
-    fetch('/enviar-validacion', { method: 'POST' })
+    fetch('/enviar-verificacion', { method: 'POST' })
     .then(r => r.json())
     .then(resp => {
 

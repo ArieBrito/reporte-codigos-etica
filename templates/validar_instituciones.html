@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 
-{% block title %}Validación de Entes Públicos{% endblock %}
+{% block title %}Verificación de Entes Públicos{% endblock %}
 
 {% block body_class %}inst-body{% endblock %}
 
@@ -36,7 +36,7 @@
     <img src="{{ url_for('static', filename='assets/icons/add.svg')}}">
 </button>
 
-<button type="button" onclick="guardarValidacion()" class="btn-guardar">
+<button type="button" onclick="guardarVerificacion()" class="btn-guardar">
     Guardar verificación
     <img src="{{ url_for('static', filename='assets/icons/save.svg')}}">
 </button>
@@ -262,7 +262,7 @@ function agregarEntrada() {
 /* =======================
    GUARDAR
 ======================= */
-function guardarValidacion() {
+function guardarVerificacion() {
 
     const confirmados = [];
 
@@ -284,7 +284,7 @@ function guardarValidacion() {
         return;
     }
 
-    fetch('/guardar-validacion', {
+    fetch('/guardar-verificacion', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ filas: confirmados })
