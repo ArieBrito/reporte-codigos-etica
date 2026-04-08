@@ -277,27 +277,42 @@ function cerrarConfirm(){
    CONFIRMAR ENVÍO
 ========================================= */
 function confirmarEnvio(){
-
     cerrarConfirm();
 
     fetch('/enviar-validacion', { method: 'POST' })
     .then(r => r.json())
     .then(resp => {
 
-        const link = document.createElement('a');
-        link.href = resp.pdf;
-        link.download = '';
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
+        // Reemplazar el modal de confirmación con el de acuse
+        document.getElementById("confirmModal").innerHTML = `
+            <div class="modal-box">
 
-        window.location.href = '/';
+                <div class="modal-header">
+                    Información enviada correctamente
+                </div>
+
+                <div class="modal-body">
+                    <p>Tu reporte ha sido enviado y el proceso ha quedado formalmente cerrado.</p>
+                </div>
+
+                <div class="modal-actions">
+                    <a href="${resp.pdf}" target="_blank" class="btn-confirm">
+                        Descargar acuse
+                    </a>
+                    <a href="/" class="btn-cancel">
+                        Ir al inicio
+                    </a>
+                </div>
+
+            </div>
+        `;
+        document.getElementById("confirmModal").style.display = "flex";
+
     })
     .catch(() => {
         alert('Error al enviar la información');
     });
 }
-
 </script>
 
 </div>
