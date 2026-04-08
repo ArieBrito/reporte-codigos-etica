@@ -85,7 +85,8 @@ function actualizarDependencias(card) {
 
     if (!cuentaSeleccionada) return;
 
-    if (cuentaSeleccionada.value === "No") {
+    if (cuentaSeleccionada.value === "No" || 
+        cuentaSeleccionada.value === "No se recibió información") {
 
         linkInput.disabled = true;
         fechaInput.disabled = true;
@@ -105,7 +106,6 @@ function actualizarDependencias(card) {
         radiosCumple.forEach(r => r.disabled = false);
     }
 }
-
 
 /* =========================================
    CARGA INICIAL
@@ -148,6 +148,7 @@ Promise.all([
                 ¿Cuenta con un Código de Ética publicado?<br/>
                 <label><input type="radio" name="cuenta_${idUnico}" value="Sí" ${guardado?.cuenta_codigo === 'Sí' ? 'checked' : ''}> Sí</label>
                 <label><input type="radio" name="cuenta_${idUnico}" value="No" ${guardado?.cuenta_codigo === 'No' ? 'checked' : ''}> No</label>
+                <label><input type="radio" name="cuenta_${idUnico}" value="No se recibió información" ${guardado?.cuenta_codigo === 'No se recibió información' ? 'checked' : ''}> No se recibió información</label>
             </p>
 
             <p>
@@ -190,8 +191,8 @@ Promise.all([
                 });
             });
 
-        // Si "No" estaba guardado, deshabilitar campos dependientes
-        if (guardado?.cuenta_codigo === 'No') {
+        if (guardado?.cuenta_codigo === 'No' || 
+            guardado?.cuenta_codigo === 'No se recibió información') {
             actualizarDependencias(div);
         }
 

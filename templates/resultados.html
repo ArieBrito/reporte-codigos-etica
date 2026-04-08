@@ -4,16 +4,18 @@
 
 {% block content %}
 
-<link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css"/>
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-<script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+<script src="https://cdn.plot.ly/plotly-2.27.0.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 
 <div class="dashboard">
 
     <div class="dashboard-header">
+        <a href="{{ url_for('home') }}" class="btn-home">
+         ← Inicio
+        </a>
         <h1>Dashboard de Códigos de Ética</h1>
-        <span id="indicador-live" class="live-badge">● EN VIVO</span>
+
     </div>
 
     <div class="cards">
@@ -26,7 +28,7 @@
             <p id="totalEntidades">—</p>
         </div>
         <div class="card-metric">
-            <h3>Promedio de avance</h3>
+            <h3>Porcentaje de cumplimiento</h3>
             <p id="promedioAvance">—</p>
         </div>
     </div>
@@ -37,7 +39,7 @@
             <canvas id="graficoLinea"></canvas>
         </div>
         <div class="panel">
-            <h3>Códigos por entidad</h3>
+            <h3>Porcentaje de cumplimiento por entidad</h3>
             <div id="mapa"></div>
         </div>
     </div>
@@ -45,7 +47,6 @@
     <div class="panel">
         <h3>Resumen por entidad</h3>
         <table id="tablaEstados">
-            <!-- thead -->
             <thead>
                 <tr>
                     <th>Entidad</th>
@@ -73,8 +74,6 @@ const sb = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 // ESTADO GLOBAL
 // ======================================================
 let grafico = null;
-let mapaLeaflet = null;
-let geojsonLayer = null;
 
 // ======================================================
 // RENDERIZADO
@@ -84,18 +83,20 @@ function renderizarMetricas(datos) {
     document.getElementById("totalCodigos").textContent = datos.total_codigos;
     document.getElementById("totalEntidades").textContent = datos.estados.length;
 
-    const promedios = datos.estados.map(e => e.porcentaje).filter(p => p > 0);
-    const promedio  = promedios.length
-        ? (promedios.reduce((a, b) => a + b, 0) / promedios.length).toFixed(1)
-        : 0;
-    document.getElementById("promedioAvance").textContent = promedio + "%";
+    const totalConSi   = datos.estados.reduce((s, e) => s + e.codigos_con_si, 0);
+    const totalNombres = datos.estados.reduce((s, e) => s + e.instituciones, 0);
+    const porcentaje   = totalNombres > 0
+        ? ((totalConSi / totalNombres) * 100).toFixed(1) + "%"
+        : "—";
+
+    document.getElementById("promedioAvance").textContent = porcentaje;
 }
 
 function renderizarGrafico(datos) {
     const ctx = document.getElementById("graficoLinea");
 
     if (grafico) {
-        grafico.data.labels   = datos.años;
+        grafico.data.labels = datos.años;
         grafico.data.datasets[0].data = datos.valores;
         grafico.update("active");
         return;
@@ -142,82 +143,84 @@ function renderizarTabla(datos) {
     });
 }
 
-function renderizarMapa(datos) {
-    if (!mapaLeaflet) {
-        mapaLeaflet = L.map("mapa").setView([23.5, -102], 5);
-        L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png").addTo(mapaLeaflet);
-    }
-
-    if (geojsonLayer) {
-        mapaLeaflet.removeLayer(geojsonLayer);
-    }
-
-    // Usar instituciones que emiten códigos (no solo con liga)
-    // para colorear el mapa — más representativo del avance real
-    const mapaInstituciones = {};
-    datos.estados.forEach(e => {
-        mapaInstituciones[e.entidad] = e.instituciones;
-    });
+async function renderizarMapa(datos) {
 
     const NOMBRE_MAP = {
         "México": "Estado de México",
     };
 
-    // Escala proporcional al máximo real
-    const valores = Object.values(mapaInstituciones).filter(v => v > 0);
-    const maxValor = valores.length ? Math.max(...valores) : 1;
+    const geojson = await fetch("/static/estados/estados_mexico.json").then(r => r.json());
 
-    function getColor(valor) {
-        if (valor === 0) return "#e0e0e0";
-        const pct = valor / maxValor;
-        if (pct > 0.75) return "#5c2335";
-        if (pct > 0.50) return "#7d2d4a";
-        if (pct > 0.25) return "#a8163d";
-        return "#c85a7a";
-    }
+    const locations = [];
+    const values    = [];
+    const textos    = [];
 
-    fetch("/static/estados_mexico.json")
-        .then(r => r.json())
-        .then(geojson => {
+    geojson.features.forEach(f => {
+        const nombreGeo  = f.properties.name;
+        const nombreBD   = NOMBRE_MAP[nombreGeo] || nombreGeo;
+        const estadoData = datos.estados.find(e => e.entidad === nombreBD);
+        const conSi      = estadoData ? estadoData.codigos_con_si : 0;
+        const total      = estadoData ? estadoData.instituciones  : 0;
+        const pct        = total > 0 ? ((conSi / total) * 100).toFixed(1) : 0;
 
-            function nombreBD(nombreGeo) {
-                return NOMBRE_MAP[nombreGeo] || nombreGeo;
-            }
+        locations.push(nombreGeo);
+        values.push(parseFloat(pct));
+        textos.push(
+            `<b>${nombreGeo}</b><br>` +
+            `Con código publicado: ${conSi}<br>` +
+            `Total instituciones: ${total}<br>` +
+            `Tasa: ${pct}%`
+        );
+    });
 
-            function estilo(feature) {
-                const bd    = nombreBD(feature.properties.name);
-                const valor = mapaInstituciones[bd] || 0;
-                return {
-                    fillColor:   getColor(valor),
-                    weight:      1,
-                    color:       "white",
-                    fillOpacity: 0.8
-                };
-            }
+    const trace = {
+        type:         "choropleth",
+        geojson:      geojson,
+        locations:    locations,
+        z:            values,
+        text:         textos,
+        hoverinfo:    "text",
+        featureidkey: "properties.name",
+        colorscale: [
+            [0,    "#e0e0e0"],
+            [0.01, "#c85a7a"],
+            [0.25, "#a8163d"],
+            [0.50, "#7d2d4a"],
+            [1,    "#5c2335"]
+        ],
+        zmin: 0,
+        zmax: 100,
+        colorbar: {
+            title:      "% cumplimiento",
+            thickness:  15,
+            len:        0.8,
+            ticksuffix: "%",
+            outlinewidth: 0
+        },
+        marker: {
+            line: { color: "white", width: 1 }
+        }
+    };
 
-            function onEachFeature(feature, layer) {
-                const bd            = nombreBD(feature.properties.name);
-                const instituciones = mapaInstituciones[bd] || 0;
-                const conLiga       = datos.mapa[bd] || 0;
-                layer.bindTooltip(`
-                    <b>${feature.properties.name}</b><br>
-                    Instituciones con código: ${instituciones}<br>
-                    Con liga registrada: ${conLiga}
-                `);
-            }
+    const layout = {
+        geo: {
+            fitbounds:      "locations",
+            visible:        false,
+            showcoastlines: false,
+        },
+        margin:        { t: 0, b: 0, l: 0, r: 0 },
+        paper_bgcolor: "white",
+        height:        400,
+    };
 
-            geojsonLayer = L.geoJson(geojson, {
-                style:         estilo,
-                onEachFeature: onEachFeature
-            }).addTo(mapaLeaflet);
-        });
+    Plotly.react("mapa", [trace], layout, { responsive: true, displayModeBar: false });
 }
 
-function actualizarDashboard(datos) {
+async function actualizarDashboard(datos) {
     renderizarMetricas(datos);
     renderizarGrafico(datos);
     renderizarTabla(datos);
-    renderizarMapa(datos);
+    await renderizarMapa(datos);
 }
 
 // ======================================================
@@ -227,14 +230,11 @@ function actualizarDashboard(datos) {
 async function cargarDatos() {
     const resp  = await fetch("/api/resultados");
     const datos = await resp.json();
-    actualizarDashboard(datos);
+    await actualizarDashboard(datos);
 }
 
 // ======================================================
-// REALTIME — Supabase WebSocket
-// Escucha cambios en codigos_etica y entes_confirmados.
-// Cuando llega cualquier cambio, recarga los datos desde
-// el endpoint /api/resultados y actualiza el dashboard.
+// REALTIME
 // ======================================================
 
 function iniciarRealtime() {
@@ -271,7 +271,7 @@ document.addEventListener("DOMContentLoaded", () => {
 </script>
 
 <style>
-
+    
 .dashboard {
     max-width: 1400px;
     margin: auto;
@@ -285,9 +285,23 @@ document.addEventListener("DOMContentLoaded", () => {
     margin-bottom: 30px;
 }
 
-.dashboard-header h1 {
-    margin: 0;
+.btn-home {
+    text-decoration: none;
+    padding: 8px 16px;
+    border-radius: 6px;
+    font-size: 14px;
+    font-weight: 600;
+    background: var(--color-primary, #611232);
+    color: white;
+    transition: 0.2s ease;
+    white-space: nowrap;
 }
+
+.btn-home:hover {
+    background: var(--color-primary-light, #7b173e);
+}
+
+.dashboard-header h1 { margin: 0; }
 
 .live-badge {
     font-size: 12px;
@@ -353,12 +367,12 @@ document.addEventListener("DOMContentLoaded", () => {
     color: #333;
 }
 
-#mapa { height: 400px; }
-
-table {
+#mapa {
+    height: 400px;
     width: 100%;
-    border-collapse: collapse;
 }
+
+table { width: 100%; border-collapse: collapse; }
 
 th {
     padding: 10px;
@@ -373,26 +387,6 @@ td {
     padding: 10px;
     border-bottom: 1px solid #f0f0f0;
     font-size: 14px;
-}
-
-.barra-container {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-}
-
-.barra-fill {
-    height: 8px;
-    background: #9B2247;
-    border-radius: 4px;
-    min-width: 2px;
-    transition: width 0.5s ease;
-}
-
-.barra-container span {
-    font-size: 13px;
-    color: #555;
-    white-space: nowrap;
 }
 
 </style>
