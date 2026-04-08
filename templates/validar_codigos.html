@@ -9,7 +9,7 @@
 <div class="codigos-container">
 
 <h1 class="title">Reporte de Códigos de Ética</h1>
-<h2>2. Verificación de códigos de ética</h2>
+<h2>2. Verifiación de códigos de ética</h2>
 
 <div id="contenedor"></div>
 
@@ -85,7 +85,8 @@ function actualizarDependencias(card) {
 
     if (!cuentaSeleccionada) return;
 
-    if (cuentaSeleccionada.value === "No") {
+    if (cuentaSeleccionada.value === "No" ||
+        cuentaSeleccionada.value === "No se recibió información") {
 
         linkInput.disabled = true;
         fechaInput.disabled = true;
@@ -148,6 +149,7 @@ Promise.all([
                 ¿Cuenta con un Código de Ética publicado?<br/>
                 <label><input type="radio" name="cuenta_${idUnico}" value="Sí" ${guardado?.cuenta_codigo === 'Sí' ? 'checked' : ''}> Sí</label>
                 <label><input type="radio" name="cuenta_${idUnico}" value="No" ${guardado?.cuenta_codigo === 'No' ? 'checked' : ''}> No</label>
+                <label><input type="radio" name="cuenta_${idUnico}" value="No se recibió información" ${guardado?.cuenta_codigo === 'No se recibió información' ? 'checked' : ''}> No se recibió información</label>
             </p>
 
             <p>
@@ -191,7 +193,8 @@ Promise.all([
             });
 
         // Si "No" estaba guardado, deshabilitar campos dependientes
-        if (guardado?.cuenta_codigo === 'No') {
+        if (guardado?.cuenta_codigo === 'No' ||
+            guardado?.cuenta_codigo === 'No se recibió información') {
             actualizarDependencias(div);
         }
 
@@ -199,30 +202,9 @@ Promise.all([
     });
 
 })
-.then(() => verificarCierre())
-.catch(err => console.error(err));
-
-function verificarCierre() {
-    fetch('/proceso-cerrado')
-        .then(r => r.json())
-        .then(resp => {
-            if (!resp.cerrado) return;
-
-            document.querySelectorAll('.card input').forEach(i => i.disabled = true);
-            document.querySelectorAll('.card button').forEach(b => b.disabled = true);
-
-            // Deshabilitar botones de acción, excepto "Volver"
-            document.querySelectorAll('button').forEach(b => {
-                if (b.textContent.trim().startsWith('←')) return;
-                b.disabled = true;
-            });
-
-            const aviso = document.createElement('div');
-            aviso.className = 'aviso-cerrado';
-            aviso.textContent = '⚠ Este proceso ya fue enviado y está cerrado. No es posible realizar modificaciones.';
-            document.querySelector('.codigos-container').prepend(aviso);
-        });
-}
+.catch(err => {
+    console.error(err);
+});
 
 
 /* =========================================

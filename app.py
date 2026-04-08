@@ -53,7 +53,15 @@ EMAIL_DOMAIN = "sesna.internal"
 def usuario_a_email(usuario: str) -> str:
     return f"{usuario}@{EMAIL_DOMAIN}"
 
+BASE_DIR = os.getcwd()
 STATIC_DIR = app.static_folder
+
+RUTA_FONDO = os.path.join(
+    STATIC_DIR,
+    "assets",
+    "acuse",
+    "acuse.png"
+)
 
 # --------------------------------------------------
 # UTILIDADES
@@ -113,12 +121,13 @@ def resultados():
 def api_resultados():
     db = create_client(SUPABASE_URL, SUPABASE_KEY)
 
-    codigos = db.table("codigos_etica").select("estado, fecha_publicacion, link, num_instituciones").execute().data or []
+    codigos = db.table("codigos_etica").select("estado, fecha_publicacion, link, num_instituciones, cuenta_codigo").execute().data or []
     entes   = db.table("entes_confirmados").select("estado").eq("confirmado", True).execute().data or []
 
     entes_por_estado   = {}
     codigos_por_estado = {}
     codigos_con_link   = {}
+    codigos_con_si     = {}
     num_obligadas      = {}
     años = {}
 
@@ -127,15 +136,19 @@ def api_resultados():
         entes_por_estado[est] = entes_por_estado.get(est, 0) + 1
 
     for c in codigos:
-        est   = c["estado"]
-        fecha = c.get("fecha_publicacion") or ""
-        link  = c.get("link") or ""
-        num   = c.get("num_instituciones") or 0
+        est    = c["estado"]
+        fecha  = c.get("fecha_publicacion") or ""
+        link   = c.get("link") or ""
+        num    = c.get("num_instituciones") or 0
+        cuenta = c.get("cuenta_codigo") or ""
 
         codigos_por_estado[est] = codigos_por_estado.get(est, 0) + 1
 
         if link.strip():
             codigos_con_link[est] = codigos_con_link.get(est, 0) + 1
+
+        if cuenta == "Sí":
+            codigos_con_si[est] = codigos_con_si.get(est, 0) + 1
 
         try:
             num_obligadas[est] = num_obligadas.get(est, 0) + int(num)
@@ -154,6 +167,7 @@ def api_resultados():
             "entidad":          est,
             "instituciones":    entes_por_estado.get(est, 0),
             "codigos_con_link": codigos_con_link.get(est, 0),
+            "codigos_con_si":   codigos_con_si.get(est, 0),
             "num_obligadas":    num_obligadas.get(est, 0),
         }
         for est in todos_estados
@@ -683,19 +697,6 @@ def enviar_validacion():
 
     url_pdf = supabase_admin.storage.from_(STORAGE_BUCKET).get_public_url(nombre_pdf)
     return jsonify({"status": "ok", "pdf": url_pdf})
-
-
-@app.route("/proceso-cerrado")
-@login_required
-def proceso_cerrado_endpoint():
-    db     = get_supabase_autenticado()
-    estado = session["estado"]
-    resp   = db.table("estados_proceso") \
-               .select("cerrado") \
-               .eq("estado", estado) \
-               .execute()
-    cerrado = bool(resp.data and resp.data[0].get("cerrado"))
-    return jsonify({"cerrado": cerrado})
 
 # --------------------------------------------------
 # ARRANQUE
