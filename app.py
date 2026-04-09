@@ -81,11 +81,6 @@ def normalizar_texto(txt):
     return txt.lower()
 
 def get_supabase_autenticado():
-    """
-    Devuelve un cliente Supabase con la sesión del usuario activo.
-    Refresca el token automáticamente si está próximo a vencer,
-    lo que permite sesiones de larga duración sin re-login.
-    """
     access_token  = session.get("access_token")
     refresh_token = session.get("refresh_token")
 
@@ -103,8 +98,6 @@ def get_supabase_autenticado():
         pass
 
     return cliente
-
-
 
 # --------------------------------------------------
 # Resultados
