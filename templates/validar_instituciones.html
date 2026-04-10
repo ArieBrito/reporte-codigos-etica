@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 
-{% block title %}Verificación de Entes Públicos{% endblock %}
+{% block title %}Validación de Entes Públicos{% endblock %}
 
 {% block body_class %}inst-body{% endblock %}
 
@@ -36,14 +36,9 @@
     <img src="{{ url_for('static', filename='assets/icons/add.svg')}}">
 </button>
 
-<button type="button" onclick="guardarVerificacion()" class="btn-guardar">
+<button type="button" onclick="guardarValidacion()" class="btn-guardar">
     Guardar verificación
     <img src="{{ url_for('static', filename='assets/icons/save.svg')}}">
-</button>
-
-<button type="button" onclick="descargarInstituciones()" class="btn-guardar">
-    Descargar instituciones guardadas
-    <img src="{{ url_for('static', filename='assets/icons/arrow_back.svg')}}">
 </button>
 
 <button type="button" onclick="irAValidarCodigos()" class="btn-validar">
@@ -61,33 +56,72 @@ let poderActivo = 'TODOS';
 let hayCambiosPendientes = false;
 
 /* =======================
-   CARGA INICIAL
+   CARGA INICIAL (bootstrap)
 ======================= */
-fetch('/instituciones-base')
+fetch('/bootstrap-instituciones')
     .then(r => r.json())
-    .then(resp => {
+    .then(boot => {
 
-        const data = resp.data;
-        if (!data.length) return;
+        const data        = boot.instituciones.data;
+        const confirmados = boot.confirmados;
+        const estatus     = boot.estatus;
 
         const formulario = document.getElementById('formulario-dinamico');
 
-        data.forEach(fila => {
+        (data || []).forEach(fila => {
             const normalizada = {
                 id:            fila.id,
                 nombre:        fila.nombre || '',
                 poderGobierno: fila.poderGobierno || fila.poder_gobierno || '',
                 confirmado:    fila.confirmado || false,
             };
-
             filasOriginales[normalizada.id] = normalizada;
             crearFila(normalizada, formulario);
         });
 
-        restaurarConfirmados();
+        // Restaurar confirmados
+        document.querySelectorAll('.form-group').forEach(div => {
+            if (confirmados.includes(div.dataset.nombre)) {
+                div.dataset.confirmado = "true";
+                div.classList.add('confirmado');
+                div.querySelector('input').readOnly = true;
+            }
+        });
+        hayCambiosPendientes = false;
+
         filtrar('TODOS');
-        aplicarEstatusCodigos();
-    });
+
+        // Aplicar estatus códigos
+        document.querySelectorAll('.form-group').forEach(div => {
+            const normalizado = div.dataset.nombre
+                .normalize("NFD")
+                .replace(/[\u0300-\u036f]/g, "")
+                .toLowerCase()
+                .replace(/\s+/g, "_");
+            const badge = div.querySelector('.badge');
+            if (estatus.includes(normalizado)) {
+                badge.textContent = "Código Validado";
+                badge.classList.remove("pendiente");
+                badge.classList.add("validado");
+            }
+        });
+
+        // Verificar cierre
+        if (boot.cerrado) {
+            document.querySelectorAll('.form-group input').forEach(i => i.disabled = true);
+            document.querySelectorAll('.form-group button').forEach(b => b.disabled = true);
+            document.querySelectorAll('button').forEach(b => {
+                if (b.textContent.trim().startsWith('Volver')) return;
+                if (b.textContent.trim().startsWith('Descargar')) return;
+                b.disabled = true;
+            });
+            const aviso = document.createElement('div');
+            aviso.className = 'aviso-cerrado';
+            aviso.textContent = '⚠ Este proceso ya fue enviado y está cerrado. No es posible realizar modificaciones.';
+            document.querySelector('.inst-container').prepend(aviso);
+        }
+    })
+    .catch(err => console.error('Bootstrap error:', err));
 
 /* =======================
    CREAR FILA
@@ -152,76 +186,8 @@ function crearFila(fila, formulario, esNueva = false) {
     formulario.appendChild(div);
 }
 
-/* =======================
-   ESTATUS CÓDIGOS
-======================= */
-function aplicarEstatusCodigos() {
-    fetch('/estatus-codigos')
-        .then(r => r.json())
-        .then(lista => {
-            document.querySelectorAll('.form-group').forEach(div => {
-                const nombre = div.dataset.nombre;
-                const normalizado = nombre
-                    .normalize("NFD")
-                    .replace(/[\u0300-\u036f]/g, "")
-                    .toLowerCase()
-                    .replace(/\s+/g, "_");
 
-                const badge = div.querySelector('.badge');
-                if (lista.includes(normalizado)) {
-                    badge.textContent = "Código Validado";
-                    badge.classList.remove("pendiente");
-                    badge.classList.add("validado");
-                }
-            });
-        });
-}
 
-/* =======================
-   RESTAURAR CONFIRMADOS
-======================= */
-function restaurarConfirmados() {
-    fetch('/entes-confirmados-nombres')
-        .then(r => r.json())
-        .then(confirmados => {
-            document.querySelectorAll('.form-group').forEach(div => {
-                if (confirmados.includes(div.dataset.nombre)) {
-                    div.dataset.confirmado = "true";
-                    div.classList.add('confirmado');
-                    div.querySelector('input').readOnly = true;
-                }
-            });
-            hayCambiosPendientes = false;
-        })
-        .then(() => verificarCierre());
-}
-
-/* =======================
-   VERIFICAR CIERRE
-======================= */
-function verificarCierre() {
-    fetch('/proceso-cerrado')
-        .then(r => r.json())
-        .then(resp => {
-            if (!resp.cerrado) return;
-
-            // Deshabilitar inputs y botones dentro de las tarjetas
-            document.querySelectorAll('.form-group input').forEach(i => i.disabled = true);
-            document.querySelectorAll('.form-group button').forEach(b => b.disabled = true);
-
-            // Deshabilitar botones de acción, excepto "Volver al inicio"
-            document.querySelectorAll('button').forEach(b => {
-                if (b.textContent.trim().startsWith('Volver')) return;
-                b.disabled = true;
-            });
-
-            // Mostrar aviso
-            const aviso = document.createElement('div');
-            aviso.className = 'aviso-cerrado';
-            aviso.textContent = '⚠ Este proceso ya fue enviado y está cerrado. No es posible realizar modificaciones.';
-            document.querySelector('.inst-container').prepend(aviso);
-        });
-}
 
 /* =======================
    FILTRADO
@@ -262,7 +228,7 @@ function agregarEntrada() {
 /* =======================
    GUARDAR
 ======================= */
-function guardarVerificacion() {
+function guardarValidacion() {
 
     const confirmados = [];
 
@@ -284,7 +250,7 @@ function guardarVerificacion() {
         return;
     }
 
-    fetch('/guardar-verificacion', {
+    fetch('/guardar-validacion', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ filas: confirmados })
@@ -316,47 +282,6 @@ function irAValidarCodigos() {
             window.location.href = '/validar-codigos';
         });
 }
-
-/* =======================
-   DESCARGAR CSV
-======================= */
-function descargarInstituciones() {
-    fetch('/instituciones-base')
-        .then(r => r.json())
-        .then(resp => {
-            const data = resp.data;
-            if (!data.length) {
-                alert('No hay instituciones guardadas');
-                return;
-            }
-
-            const encabezado = ["Nombre", "Poder de Gobierno", "Confirmado"];
-            const filas = data.map(fila => [
-                fila.nombre        || fila.nombre        || "",
-                fila.poder_gobierno || fila.poderGobierno || "",
-                fila.confirmado ? "Sí" : "No"
-            ]);
-
-            const BOM      = "\uFEFF";
-            const contenido = BOM + [encabezado, ...filas]
-                .map(fila => fila
-                    .map(celda => `"${String(celda).replace(/"/g, '""')}"`)
-                    .join(","))
-                .join("\n");
-
-            const blob = new Blob([contenido], { type: "text/csv;charset=utf-8;" });
-            const url  = URL.createObjectURL(blob);
-            const a    = document.createElement("a");
-            a.href     = url;
-            a.download = "instituciones_verificadas.csv";
-            document.body.appendChild(a);
-            a.click();
-            document.body.removeChild(a);
-            URL.revokeObjectURL(url);
-        })
-        .catch(() => alert('Error al descargar'));
-}
-
 </script>
 
 </div>

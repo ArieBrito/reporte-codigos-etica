@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 
-{% block title %}Verificación de códigos{% endblock %}
+{% block title %}Validación de códigos{% endblock %}
 
 {% block body_class %}codigos-body{% endblock %}
 
@@ -19,12 +19,10 @@
 ← Volver a verificación de Entes Públicos
 </button>
 
-<button onclick="enviarVerificacion()">
-Enviar información
-</button>
+<button onclick="guardarTodo()" class="btn-guardar">Guardar todo</button>
 
-<button type="button" onclick="descargarCodigos()">
-Descargar información
+<button onclick="enviarValidacion()">
+Enviar información
 </button>
 
 
@@ -116,21 +114,22 @@ function actualizarDependencias(card) {
    CARGA INICIAL
 ========================================= */
 
-Promise.all([
-    fetch('/instituciones-confirmadas').then(r => r.json()),
-    fetch('/estatus-codigos').then(r => r.json()),
-    fetch('/datos-codigos').then(r => r.json())
-])
-.then(([instituciones, codigosGuardados, datosCodigos]) => {
+fetch('/bootstrap-codigos')
+.then(r => r.json())
+.then(boot => {
+
+    const instituciones = boot.instituciones;
+    const datosCodigos  = boot.datos;
+    const codigosMap    = new Set(boot.estatus);
 
     const contenedor = document.getElementById('contenedor');
 
     if (!instituciones.length) {
-        contenedor.innerHTML = '<p>No hay instituciones confirmadas.</p>';
+        const _p = document.createElement('p');
+        _p.textContent = 'No hay instituciones confirmadas.';
+        contenedor.appendChild(_p);
         return;
     }
-
-    const codigosMap = new Set(codigosGuardados);
 
     instituciones.forEach(inst => {
 
@@ -146,43 +145,83 @@ Promise.all([
         div.dataset.nombre = nombreOriginal;
         div.dataset.idUnico = idUnico;
 
-        div.innerHTML = `
-            <h3>${nombreSeguro}</h3>
+        // ── Título ──────────────────────────────────────────
+        const h3 = document.createElement('h3');
+        h3.textContent = nombreOriginal;
+        div.appendChild(h3);
 
-            <p>
-                ¿Cuenta con un Código de Ética publicado?<br/>
-                <label><input type="radio" name="cuenta_${idUnico}" value="Sí" ${guardado?.cuenta_codigo === 'Sí' ? 'checked' : ''}> Sí</label>
-                <label><input type="radio" name="cuenta_${idUnico}" value="No" ${guardado?.cuenta_codigo === 'No' ? 'checked' : ''}> No</label>
-                <label><input type="radio" name="cuenta_${idUnico}" value="No se recibió información" ${guardado?.cuenta_codigo === 'No se recibió información' ? 'checked' : ''}> No se recibió información</label>
-            </p>
+        // ── ¿Cuenta con código? ──────────────────────────────
+        const pCuenta = document.createElement('p');
+        pCuenta.textContent = '¿Cuenta con un Código de Ética publicado?';
+        pCuenta.appendChild(document.createElement('br'));
+        [['Sí', guardado?.cuenta_codigo === 'Sí'],
+         ['No', guardado?.cuenta_codigo === 'No'],
+         ['No se recibió información', guardado?.cuenta_codigo === 'No se recibió información']
+        ].forEach(([val, chk]) => {
+            const lbl = document.createElement('label');
+            const r   = document.createElement('input');
+            r.type = 'radio'; r.name = `cuenta_${idUnico}`; r.value = val;
+            r.checked = chk; r.disabled = true;
+            lbl.appendChild(r); lbl.append(' ' + val);
+            pCuenta.appendChild(lbl);
+        });
+        div.appendChild(pCuenta);
 
-            <p>
-                Enlace al sitio web oficial<br/>
-                <input type="text" id="link_${idUnico}" placeholder="https://..." value="${guardado?.link || ''}">
-            </p>
+        // ── Enlace ───────────────────────────────────────────
+        const pLink = document.createElement('p');
+        pLink.textContent = 'Enlace al sitio web oficial';
+        pLink.appendChild(document.createElement('br'));
+        const linkInput = document.createElement('input');
+        linkInput.type = 'text'; linkInput.id = `link_${idUnico}`;
+        linkInput.placeholder = 'https://...';
+        linkInput.value = guardado?.link || '';
+        linkInput.disabled = true;
+        pLink.appendChild(linkInput);
+        div.appendChild(pLink);
 
-            <p>
-                Fecha de publicación<br/>
-                <input type="date" id="fecha_${idUnico}" value="${guardado?.fecha_publicacion || ''}">
-            </p>
+        // ── Fecha ────────────────────────────────────────────
+        const pFecha = document.createElement('p');
+        pFecha.textContent = 'Fecha de publicación';
+        pFecha.appendChild(document.createElement('br'));
+        const fechaInput = document.createElement('input');
+        fechaInput.type = 'date'; fechaInput.id = `fecha_${idUnico}`;
+        fechaInput.value = guardado?.fecha_publicacion || '';
+        fechaInput.disabled = true;
+        pFecha.appendChild(fechaInput);
+        div.appendChild(pFecha);
 
-            <p>
-                ¿El código de ética contempla en sus considerandos o en la fundamentación el ACUERDO por el que se dan a conocer los Lineamientos para la emisión del Código de Ética a que se refiere el artículo 16 de la Ley General de Responsabilidades Administrativas, publicado en el Diario Oficial de la Federación el 12 de octubre de 2018?<br/>
-                <label><input type="radio" name="cumple_${idUnico}" value="Sí" ${guardado?.cumple_lineamientos === 'Sí' ? 'checked' : ''}> Sí</label>
-                <label><input type="radio" name="cumple_${idUnico}" value="No" ${guardado?.cumple_lineamientos === 'No' ? 'checked' : ''}> No</label>
-            </p>
+        // ── ¿Cumple lineamientos? ────────────────────────────
+        const pCumple = document.createElement('p');
+        pCumple.textContent = '¿El código de ética contempla en sus considerandos o en la fundamentación el ACUERDO por el que se dan a conocer los Lineamientos para la emisión del Código de Ética a que se refiere el artículo 16 de la Ley General de Responsabilidades Administrativas, publicado en el Diario Oficial de la Federación el 12 de octubre de 2018?';
+        pCumple.appendChild(document.createElement('br'));
+        [['Sí', guardado?.cumple_lineamientos === 'Sí'],
+         ['No', guardado?.cumple_lineamientos === 'No']
+        ].forEach(([val, chk]) => {
+            const lbl = document.createElement('label');
+            const r   = document.createElement('input');
+            r.type = 'radio'; r.name = `cumple_${idUnico}`; r.value = val;
+            r.checked = chk; r.disabled = true;
+            lbl.appendChild(r); lbl.append(' ' + val);
+            pCumple.appendChild(lbl);
+        });
+        div.appendChild(pCumple);
 
-            <p>
-                Número de instituciones obligadas<br/>
-                <input type="number" id="num_${idUnico}" value="${guardado?.num_instituciones ?? 0}" min="0">
-            </p>
+        // ── Número de instituciones ──────────────────────────
+        const pNum = document.createElement('p');
+        pNum.textContent = 'Número de instituciones obligadas';
+        pNum.appendChild(document.createElement('br'));
+        const numInput = document.createElement('input');
+        numInput.type = 'number'; numInput.id = `num_${idUnico}`;
+        numInput.value = guardado?.num_instituciones ?? 0;
+        numInput.min = '0'; numInput.disabled = true;
+        pNum.appendChild(numInput);
+        div.appendChild(pNum);
 
-            <button onclick="editarCode(this)">Editar</button>
-            <button onclick="guardarCode(this)">Guardar</button>
-        `;
-
-        // Campos deshabilitados por defecto
-        div.querySelectorAll('input').forEach(i => i.disabled = true);
+        // ── Botón editar (guardar es por lote desde "Guardar todo") ──
+        const btnEditar = document.createElement('button');
+        btnEditar.textContent = 'Editar';
+        btnEditar.onclick = () => editarCode(btnEditar);
+        div.appendChild(btnEditar);
 
         // Si ya tiene datos guardados, marcar como validado
         if (codigosMap.has(idUnico)) {
@@ -205,57 +244,25 @@ Promise.all([
         contenedor.appendChild(div);
     });
 
+    // Verificar cierre usando boot.cerrado — sin fetch extra
+    if (boot.cerrado) {
+        document.querySelectorAll('.card input').forEach(i => i.disabled = true);
+        document.querySelectorAll('.card button').forEach(b => b.disabled = true);
+        document.querySelectorAll('button').forEach(b => {
+            if (b.textContent.trim().startsWith('←')) return;
+            if (b.textContent.trim().startsWith('Descargar')) return;
+            if (b.textContent.trim().startsWith('Guardar todo')) return;
+            b.disabled = true;
+        });
+        const aviso = document.createElement('div');
+        aviso.className = 'aviso-cerrado';
+        aviso.textContent = '⚠ Este proceso ya fue enviado y está cerrado. No es posible realizar modificaciones.';
+        document.querySelector('.codigos-container').prepend(aviso);
+    }
+
 })
-.catch(err => {
-    console.error(err);
-});
+.catch(err => console.error('Bootstrap error:', err));
 
-
-/* =========================================
-   DESCARGAR CSV
-========================================= */
-function descargarCodigos() {
-    fetch('/datos-codigos')
-        .then(r => r.json())
-        .then(datos => {
-            const keys = Object.keys(datos);
-            if (!keys.length) { alert('No hay información guardada'); return; }
-
-            const encabezado = [
-                "Institución",
-                "¿Cuenta con código?",
-                "Liga de publicación",
-                "Fecha de publicación",
-                "¿Cumple lineamientos?",
-                "Núm. instituciones obligadas"
-            ];
-
-            const filas = keys.map(k => {
-                const d = datos[k];
-                return [
-                    d.nombre               || "",
-                    d.cuenta_codigo        || "",
-                    d.link                 || "",
-                    d.fecha_publicacion    || "",
-                    d.cumple_lineamientos  || "",
-                    d.num_instituciones    ?? ""
-                ];
-            });
-
-            const BOM = "\uFEFF";
-            const contenido = BOM + [encabezado, ...filas]
-                .map(fila => fila.map(c => `"${String(c).replace(/"/g, '""')}"`).join(","))
-                .join("\n");
-
-            const blob = new Blob([contenido], { type: "text/csv;charset=utf-8;" });
-            const url  = URL.createObjectURL(blob);
-            const a    = document.createElement("a");
-            a.href = url; a.download = "codigos_etica_cotejo.csv";
-            document.body.appendChild(a); a.click();
-            document.body.removeChild(a); URL.revokeObjectURL(url);
-        })
-        .catch(() => alert("Error al descargar"));
-}
 
 /* =========================================
    EDITAR
@@ -271,53 +278,47 @@ function editarCode(btn) {
 
 
 /* =========================================
-   GUARDAR
+   GUARDAR POR LOTE
 ========================================= */
-function guardarCode(btn) {
+function guardarTodo() {
 
-    const card = btn.parentElement;
-    const nombreOriginal = card.dataset.nombre;
-    const idUnico = card.dataset.idUnico;
+    const cards = document.querySelectorAll('.card');
+    if (!cards.length) { alert('No hay información que guardar'); return; }
 
-    const cuenta = card.querySelector(`input[name="cuenta_${idUnico}"]:checked`)?.value || '';
-    const cumple = card.querySelector(`input[name="cumple_${idUnico}"]:checked`)?.value || '';
-    const link = card.querySelector(`#link_${idUnico}`).value.trim();
-    const fecha = card.querySelector(`#fecha_${idUnico}`).value;
-    const num = card.querySelector(`#num_${idUnico}`).value;
+    const payload = [];
 
-    const payload = [{
-        nombre: nombreOriginal,
-        cuenta_codigo: cuenta,
-        link: link,
-        fecha_publicacion: fecha,
-        cumple_lineamientos: cumple,
-        num_instituciones: num
-    }];
+    cards.forEach(card => {
+        const nombreOriginal = card.dataset.nombre;
+        const idUnico        = card.dataset.idUnico;
+        const cuenta = card.querySelector(`input[name="cuenta_${idUnico}"]:checked`)?.value || '';
+        const cumple = card.querySelector(`input[name="cumple_${idUnico}"]:checked`)?.value || '';
+        const link   = card.querySelector(`#link_${idUnico}`).value.trim();
+        const fecha  = card.querySelector(`#fecha_${idUnico}`).value;
+        const num    = card.querySelector(`#num_${idUnico}`).value;
+        payload.push({ nombre: nombreOriginal, cuenta_codigo: cuenta, link, fecha_publicacion: fecha, cumple_lineamientos: cumple, num_instituciones: num });
+    });
 
-    fetch('/guardar-verificacion-codigos', {
-        method: 'POST',
+    fetch('/guardar-validacion-codigos', {
+        method:  'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
+        body:    JSON.stringify(payload)
     })
     .then(r => r.json())
     .then(() => {
-
         alert('Información guardada correctamente');
-
-        card.querySelectorAll('input').forEach(i => i.disabled = true);
-
-        card.classList.add('codigo-validado');
+        cards.forEach(card => {
+            card.querySelectorAll('input').forEach(i => i.disabled = true);
+            card.classList.add('codigo-validado');
+        });
     })
-    .catch(() => {
-        alert('No se pudo guardar la información');
-    });
+    .catch(() => alert('No se pudo guardar la información'));
 }
 
 
 /* =========================================
    ABRIR MODAL
 ========================================= */
-function enviarVerificacion(){
+function enviarValidacion(){
     document.getElementById("confirmModal").style.display = "flex";
 }
 
@@ -332,34 +333,36 @@ function cerrarConfirm(){
 function confirmarEnvio(){
     cerrarConfirm();
 
-    fetch('/enviar-verificacion', { method: 'POST' })
+    fetch('/enviar-validacion', { method: 'POST' })
     .then(r => r.json())
     .then(resp => {
 
-        // Reemplazar el modal de confirmación con el de acuse
-        document.getElementById("confirmModal").innerHTML = `
-            <div class="modal-box">
+        function urlSegura(url) {
+            try {
+                const u = new URL(url);
+                return (u.protocol === 'http:' || u.protocol === 'https:') ? url : '#';
+            } catch { return '#'; }
+        }
 
-                <div class="modal-header">
-                    Información enviada correctamente
-                </div>
-
-                <div class="modal-body">
-                    <p>Tu reporte ha sido enviado y el proceso ha quedado formalmente cerrado.</p>
-                </div>
-
-                <div class="modal-actions">
-                    <a href="${resp.pdf}" target="_blank" class="btn-confirm">
-                        Descargar acuse
-                    </a>
-                    <a href="/" class="btn-cancel">
-                        Ir al inicio
-                    </a>
-                </div>
-
-            </div>
-        `;
-        document.getElementById("confirmModal").style.display = "flex";
+        const modal = document.getElementById("confirmModal");
+        while (modal.firstChild) modal.removeChild(modal.firstChild);
+        const box    = document.createElement('div'); box.className = 'modal-box';
+        const hdr    = document.createElement('div'); hdr.className = 'modal-header';
+        hdr.textContent = 'Información enviada correctamente';
+        const bdy    = document.createElement('div'); bdy.className = 'modal-body';
+        const pMsg   = document.createElement('p');
+        pMsg.textContent = 'Tu reporte ha sido enviado y el proceso ha quedado formalmente cerrado.';
+        bdy.appendChild(pMsg);
+        const acts   = document.createElement('div'); acts.className = 'modal-actions';
+        const aPdf   = document.createElement('a');
+        aPdf.href = urlSegura(resp.pdf); aPdf.target = '_blank';
+        aPdf.className = 'btn-confirm'; aPdf.textContent = 'Descargar acuse';
+        const aHome  = document.createElement('a');
+        aHome.href = '/'; aHome.className = 'btn-cancel'; aHome.textContent = 'Ir al inicio';
+        acts.appendChild(aPdf); acts.appendChild(aHome);
+        box.appendChild(hdr); box.appendChild(bdy); box.appendChild(acts);
+        modal.appendChild(box);
+        modal.style.display = "flex";
 
     })
     .catch(() => {

@@ -12,6 +12,7 @@ import unicodedata
 import re
 from functools import wraps
 from datetime import datetime
+import time
 
 from reportlab.lib.pagesizes import LETTER
 from reportlab.lib.utils import ImageReader
@@ -47,21 +48,21 @@ supabase_admin: Client = create_client(SUPABASE_URL, SUPABASE_SERVICE_KEY)
 STORAGE_BUCKET = "acuses"
 FONDO_STORAGE  = "acuse.png"
 
+# ── Caché del dashboard ──────────────────────────────────
+_cache_resultados: dict = {"data": None, "ts": 0.0}
+CACHE_TTL = 30  # segundos
+
+def invalidar_cache():
+    _cache_resultados["data"] = None
+    _cache_resultados["ts"]   = 0.0
+
 # Dominio ficticio para construir emails a partir del nombre de usuario
 EMAIL_DOMAIN = "sesna.internal"
 
 def usuario_a_email(usuario: str) -> str:
     return f"{usuario}@{EMAIL_DOMAIN}"
 
-BASE_DIR = os.getcwd()
 STATIC_DIR = app.static_folder
-
-RUTA_FONDO = os.path.join(
-    STATIC_DIR,
-    "assets",
-    "acuse",
-    "acuse.png"
-)
 
 # --------------------------------------------------
 # UTILIDADES
@@ -81,6 +82,11 @@ def normalizar_texto(txt):
     return txt.lower()
 
 def get_supabase_autenticado():
+    """
+    Devuelve un cliente Supabase con la sesión del usuario activo.
+    Refresca el token automáticamente si está próximo a vencer,
+    lo que permite sesiones de larga duración sin re-login.
+    """
     access_token  = session.get("access_token")
     refresh_token = session.get("refresh_token")
 
@@ -99,6 +105,8 @@ def get_supabase_autenticado():
 
     return cliente
 
+
+
 # --------------------------------------------------
 # Resultados
 # --------------------------------------------------
@@ -114,17 +122,15 @@ def resultados():
 def api_resultados():
     db = create_client(SUPABASE_URL, SUPABASE_KEY)
 
-    codigos = db.table("codigos_etica").select(
-        "estado, fecha_publicacion, link, num_instituciones, cuenta_codigo, nombre"
-    ).execute().data or []
-    entes = db.table("entes_confirmados").select("estado").eq("confirmado", True).execute().data or []
+    codigos = db.table("codigos_etica").select("estado, fecha_publicacion, link, num_instituciones, cuenta_codigo, nombre").execute().data or []
+    entes   = db.table("entes_confirmados").select("estado").eq("confirmado", True).execute().data or []
 
-    entes_por_estado   = {}
-    codigos_por_estado = {}
-    codigos_con_link   = {}
-    codigos_con_si     = {}
-    num_obligadas      = {}
-    instituciones_por_estado = {}  # ← nuevo
+    entes_por_estado         = {}
+    codigos_por_estado       = {}
+    codigos_con_link         = {}
+    codigos_con_si           = {}
+    num_obligadas            = {}
+    instituciones_por_estado = {}
     años = {}
 
     for e in entes:
@@ -137,7 +143,6 @@ def api_resultados():
         link   = c.get("link") or ""
         num    = c.get("num_instituciones") or 0
         cuenta = c.get("cuenta_codigo") or ""
-        nombre = c.get("nombre") or ""
 
         codigos_por_estado[est] = codigos_por_estado.get(est, 0) + 1
 
@@ -156,14 +161,14 @@ def api_resultados():
             año = str(fecha)[:4]
             años[año] = años.get(año, 0) + 1
 
-        # Guardar institución con su estatus
+        nombre = c.get("nombre") or ""
         if est not in instituciones_por_estado:
             instituciones_por_estado[est] = []
         instituciones_por_estado[est].append({
-            "nombre":  nombre,
-            "cuenta":  cuenta,
-            "link":    link,
-            "fecha":   fecha,
+            "nombre": nombre,
+            "cuenta": cuenta,
+            "link":   link,
+            "fecha":  fecha,
         })
 
     todos_estados  = set(codigos_por_estado) | set(entes_por_estado)
@@ -184,13 +189,16 @@ def api_resultados():
         for est in todos_estados
     ], key=lambda x: x["entidad"])
 
-    return jsonify({
+    resultado = {
         "total_codigos": len(codigos),
         "años":          [a for a, _ in años_ordenados],
         "valores":       [b for _, b in años_ordenados],
         "mapa":          codigos_con_link,
         "estados":       estados
-    })
+    }
+    _cache_resultados["data"] = resultado
+    _cache_resultados["ts"]   = time.time()
+    return jsonify(resultado)
 # --------------------------------------------------
 # DECORADOR LOGIN
 # --------------------------------------------------
@@ -284,7 +292,7 @@ def home():
     )
 
 # --------------------------------------------------
-# VERIFICACIÓN DE INSTITUCIONES
+# VALIDACIÓN DE INSTITUCIONES
 # --------------------------------------------------
 
 @app.route("/validar-instituciones")
@@ -336,9 +344,9 @@ def instituciones_base():
     return jsonify({"fuente": "original", "data": data})
 
 
-@app.route("/guardar-verificacion", methods=["POST"])
+@app.route("/guardar-validacion", methods=["POST"])
 @login_required
-def guardar_verificacion():
+def guardar_validacion():
 
     estado = session["estado"]
     db = get_supabase_autenticado()
@@ -378,6 +386,7 @@ def guardar_verificacion():
         .upsert(registros, on_conflict="estado,nombre") \
         .execute()
 
+    invalidar_cache()
     return jsonify({"status": "ok"})
 
 
@@ -415,7 +424,7 @@ def entes_confirmados_nombres():
 
 
 # --------------------------------------------------
-# VERIFICACIÓN DE CÓDIGOS
+# VALIDACIÓN DE CÓDIGOS
 # --------------------------------------------------
 
 @app.route("/validar-codigos")
@@ -501,9 +510,9 @@ def instituciones_confirmadas():
     return jsonify(data)
 
 
-@app.route("/guardar-verificacion-codigos", methods=["POST"])
+@app.route("/guardar-validacion-codigos", methods=["POST"])
 @login_required
-def guardar_verificacion_codigos():
+def guardar_validacion_codigos():
 
     estado = session["estado"]
     db = get_supabase_autenticado()
@@ -543,15 +552,16 @@ def guardar_verificacion_codigos():
         .upsert(registros, on_conflict="estado,nombre") \
         .execute()
 
+    invalidar_cache()
     return jsonify({"status": "ok"})
 
 # --------------------------------------------------
 # ENVÍO FINAL + PDF
 # --------------------------------------------------
 
-@app.route("/enviar-verificacion", methods=["POST"])
+@app.route("/enviar-validacion", methods=["POST"])
 @login_required
-def enviar_verificacion():
+def enviar_validacion():
 
     estado = session["estado"]
     db = get_supabase_autenticado()
@@ -710,8 +720,107 @@ def enviar_verificacion():
     return jsonify({"status": "ok", "pdf": url_pdf})
 
 # --------------------------------------------------
+# BOOTSTRAP
+# --------------------------------------------------
+
+@app.route("/bootstrap-instituciones")
+@login_required
+def bootstrap_instituciones():
+    estado = session["estado"]
+    db = get_supabase_autenticado()
+
+    resp_guardados = db.table("entes_confirmados") \
+        .select("*").eq("estado", estado).execute()
+
+    if resp_guardados.data:
+        instituciones = {"fuente": "guardado", "data": resp_guardados.data}
+    else:
+        resp_base = db.table("instituciones") \
+            .select("*").eq("entidad_nombre", estado).execute()
+        data = [
+            {
+                "id":             r["id"],
+                "nombre":         r["nombre"],
+                "poderGobierno":  r["poder_gobierno"],
+                "entidad.nombre": r["entidad_nombre"],
+            }
+            for r in (resp_base.data or [])
+        ]
+        instituciones = {"fuente": "original", "data": data}
+
+    confirmados = [
+        r["nombre"] for r in (resp_guardados.data or [])
+        if r.get("confirmado")
+    ]
+
+    resp_codigos = db.table("codigos_etica") \
+        .select("nombre").eq("estado", estado).execute()
+    estatus = [normalizar_texto(r["nombre"]) for r in (resp_codigos.data or [])]
+
+    resp_proceso = db.table("estados_proceso") \
+        .select("cerrado").eq("estado", estado).execute()
+    cerrado = bool(resp_proceso.data and resp_proceso.data[0].get("cerrado"))
+
+    return jsonify({
+        "instituciones": instituciones,
+        "confirmados":   confirmados,
+        "estatus":       estatus,
+        "cerrado":       cerrado,
+    })
+
+
+@app.route("/bootstrap-codigos")
+@login_required
+def bootstrap_codigos():
+    estado = session["estado"]
+    db = get_supabase_autenticado()
+
+    resp_entes = db.table("entes_confirmados") \
+        .select("nombre, poder_gobierno") \
+        .eq("estado", estado).eq("confirmado", True).execute()
+    instituciones = [
+        {"nombre": r["nombre"], "poderGobierno": r.get("poder_gobierno")}
+        for r in (resp_entes.data or [])
+    ]
+
+    resp_codigos = db.table("codigos_etica") \
+        .select("*").eq("estado", estado).execute()
+
+    datos = {}
+    estatus = []
+    for r in (resp_codigos.data or []):
+        clave = normalizar_texto(r["nombre"])
+        datos[clave] = r
+        estatus.append(clave)
+
+    resp_proceso = db.table("estados_proceso") \
+        .select("cerrado").eq("estado", estado).execute()
+    cerrado = bool(resp_proceso.data and resp_proceso.data[0].get("cerrado"))
+
+    return jsonify({
+        "instituciones": instituciones,
+        "datos":         datos,
+        "estatus":       estatus,
+        "cerrado":       cerrado,
+    })
+
+
+@app.route("/proceso-cerrado")
+@login_required
+def proceso_cerrado_endpoint():
+    db     = get_supabase_autenticado()
+    estado = session["estado"]
+    resp   = db.table("estados_proceso") \
+               .select("cerrado") \
+               .eq("estado", estado) \
+               .execute()
+    cerrado = bool(resp.data and resp.data[0].get("cerrado"))
+    return jsonify({"cerrado": cerrado})
+
+
+# --------------------------------------------------
 # ARRANQUE
 # --------------------------------------------------
 
 if __name__ == "__main__":
-    app.run()
+    app.run(debug=True)
