@@ -13,7 +13,8 @@ from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
 from reportlab.lib import colors
 from reportlab.lib.units import inch
 
-from supabase import create_client, Client
+from supabase import create_client, Client, ClientOptions
+import httpx
 
 # ==============================================================
 # CONFIGURACIÓN DE LA APP
@@ -23,18 +24,36 @@ app = Flask(__name__)
 app.secret_key = os.environ.get("FLASK_SECRET_KEY")
 
 # ==============================================================
+# TIMEOUTS
+# CONNECT_TIMEOUT : tiempo máximo para establecer la conexión TCP.
+# READ_TIMEOUT    : tiempo máximo esperando la primera respuesta.
+# Se aplican tanto a requests.get (imagen de fondo del PDF) como
+# a los clientes Supabase (postgrest y storage).
+# ==============================================================
+
+CONNECT_TIMEOUT = 3.05   # segundos — margen sobre el RTT típico de 3 s
+READ_TIMEOUT    = 10.0   # segundos — suficiente para queries normales
+
+_HTTPX_TIMEOUT = httpx.Timeout(READ_TIMEOUT, connect=CONNECT_TIMEOUT)
+_SB_OPTIONS    = ClientOptions(
+    postgrest_client_timeout = _HTTPX_TIMEOUT,
+    storage_client_timeout   = int(READ_TIMEOUT),
+)
+
+# ==============================================================
 # CLIENTES SUPABASE
 # Usamos dos clientes:
 #   · supabase       → cliente anónimo / RLS activo (usuarios)
 #   · supabase_admin → service role, sin RLS (operaciones internas)
+# Ambos comparten los mismos timeouts definidos en _SB_OPTIONS.
 # ==============================================================
 
 SUPABASE_URL         = os.environ.get("SUPABASE_URL")
 SUPABASE_KEY         = os.environ.get("SUPABASE_KEY")
 SUPABASE_SERVICE_KEY = os.environ.get("SUPABASE_SERVICE_KEY")
 
-supabase:       Client = create_client(SUPABASE_URL, SUPABASE_KEY)
-supabase_admin: Client = create_client(SUPABASE_URL, SUPABASE_SERVICE_KEY)
+supabase:       Client = create_client(SUPABASE_URL, SUPABASE_KEY,         options=_SB_OPTIONS)
+supabase_admin: Client = create_client(SUPABASE_URL, SUPABASE_SERVICE_KEY, options=_SB_OPTIONS)
 
 STORAGE_BUCKET = "acuses"
 FONDO_STORAGE  = "acuse.png"   # imagen de fondo para el PDF
@@ -82,20 +101,32 @@ def normalizar_texto(txt):
     txt = re.sub(r"\s+", "_", txt)
     return txt.lower()
 
+_CAMPOS_SESION = ("usuario", "estado", "access_token", "refresh_token")
+
+def _sesion_valida() -> bool:
+    """Devuelve True solo si los cuatro campos de sesión están presentes."""
+    return all(session.get(c) for c in _CAMPOS_SESION)
+
+def _limpiar_sesion_y_redirigir():
+    """Limpia la sesión parcial y redirige al login."""
+    session.clear()
+    return redirect(url_for("login"))
+
 def get_supabase_autenticado():
     """
     Devuelve un cliente Supabase con la sesión del usuario activo.
     Refresca el token automáticamente si está próximo a vencer,
     lo que permite sesiones de larga duración sin re-login.
-    Retorna None si no hay sesión activa.
+    Lanza RuntimeError si la sesión está incompleta (no debería ocurrir
+    porque login_required ya la valida antes de llegar aquí).
     """
-    access_token  = session.get("access_token")
-    refresh_token = session.get("refresh_token")
+    if not _sesion_valida():
+        raise RuntimeError("Sesión incompleta — acceso no autorizado")
 
-    if not access_token:
-        return None
+    access_token  = session["access_token"]
+    refresh_token = session["refresh_token"]
 
-    cliente = create_client(SUPABASE_URL, SUPABASE_KEY)
+    cliente = create_client(SUPABASE_URL, SUPABASE_KEY, options=_SB_OPTIONS)
 
     try:
         resp = cliente.auth.set_session(access_token, refresh_token)
@@ -109,14 +140,15 @@ def get_supabase_autenticado():
 
 # ==============================================================
 # DECORADOR DE AUTENTICACIÓN
-# Redirige al home si el usuario no tiene sesión activa.
+# Exige los cuatro campos de sesión. Si alguno falta (sesión
+# parcial o caducada) limpia la cookie y redirige a /login.
 # ==============================================================
 
 def login_required(f):
     @wraps(f)
     def wrapper(*args, **kwargs):
-        if "usuario" not in session:
-            return redirect(url_for("home"))
+        if not _sesion_valida():
+            return _limpiar_sesion_y_redirigir()
         return f(*args, **kwargs)
     return wrapper
 
@@ -140,11 +172,27 @@ def login():
             })
 
             # El estado del usuario se almacena en sus metadatos de Supabase Auth
-            estado = (resp.user.user_metadata or {}).get("estado", "")
+            estado = (resp.user.user_metadata or {}).get("estado", "").strip()
             if not estado:
                 return render_template(
                     "login.html",
                     error="Este usuario no tiene un estado asignado. Contacta al administrador."
+                )
+
+            # F2-08: verificar que el valor de estado exista en el catálogo
+            # para detectar errores de aprovisionamiento antes de que rompan
+            # consultas posteriores con pantallas vacías o 500.
+            existe = supabase.table("instituciones") \
+                .select("id") \
+                .eq("entidad_nombre", estado) \
+                .limit(1).execute()
+            if not existe.data:
+                return render_template(
+                    "login.html",
+                    error=(
+                        f"El estado '{estado}' no coincide con ningún registro "
+                        "en el catálogo. Contacta al administrador."
+                    )
                 )
 
             session["usuario"]       = usuario
@@ -207,7 +255,7 @@ def api_resultados():
     if _cache_resultados["data"] and (ahora - _cache_resultados["ts"] < CACHE_TTL):
         return jsonify(_cache_resultados["data"])
 
-    db = create_client(SUPABASE_URL, SUPABASE_KEY)
+    db = create_client(SUPABASE_URL, SUPABASE_KEY, options=_SB_OPTIONS)
 
     # Las vistas SQL hacen el trabajo pesado de agregación
     resumen = db.table("vista_resultados").select("*").execute().data or []
@@ -272,36 +320,7 @@ def validar_instituciones():
     )
 
 
-@app.route("/instituciones-base")
-@login_required
-def instituciones_base():
-    """
-    Devuelve las instituciones del estado actual.
-    Prioridad: entes ya guardados > catálogo base original.
-    """
-    estado = session["estado"]
-    db     = get_supabase_autenticado()
-
-    guardados = db.table("entes_confirmados") \
-        .select("*").eq("estado", estado).execute().data
-
-    if guardados:
-        return jsonify({"fuente": "guardado", "data": guardados})
-
-    base = db.table("instituciones") \
-        .select("*").eq("entidad_nombre", estado).execute().data or []
-
-    data = [
-        {
-            "id":             r["id"],
-            "nombre":         r["nombre"],
-            "poderGobierno":  r["poder_gobierno"],
-            "entidad.nombre": r["entidad_nombre"],
-        }
-        for r in base
-    ]
-
-    return jsonify({"fuente": "original", "data": data})
+# /instituciones-base fue eliminado: su lógica vive en /bootstrap-instituciones.
 
 
 @app.route("/guardar-validacion", methods=["POST"])
@@ -397,50 +416,13 @@ def validar_codigos():
     )
 
 
-@app.route("/datos-codigos")
-@login_required
-def datos_codigos():
-    """Devuelve los códigos de ética guardados, indexados por nombre normalizado."""
-    estado = session["estado"]
-    db     = get_supabase_autenticado()
-
-    resp = db.table("codigos_etica").select("*").eq("estado", estado).execute()
-
-    return jsonify({
-        normalizar_texto(r["nombre"]): r
-        for r in (resp.data or [])
-    })
+# /datos-codigos fue eliminado: su lógica vive en /bootstrap-codigos.
 
 
-@app.route("/estatus-codigos")
-@login_required
-def estatus_codigos():
-    """Lista de claves normalizadas de instituciones que ya tienen código guardado."""
-    estado = session["estado"]
-    db     = get_supabase_autenticado()
-
-    resp = db.table("codigos_etica") \
-        .select("nombre").eq("estado", estado).execute()
-
-    return jsonify([normalizar_texto(r["nombre"]) for r in (resp.data or [])])
+# /estatus-codigos fue eliminado: su lógica vive en /bootstrap-codigos.
 
 
-@app.route("/instituciones-confirmadas")
-@login_required
-def instituciones_confirmadas():
-    """Listado de entes confirmados con su poder de gobierno."""
-    estado = session["estado"]
-    db     = get_supabase_autenticado()
-
-    resp = db.table("entes_confirmados") \
-        .select("*").eq("estado", estado).eq("confirmado", True).execute()
-
-    data = [
-        {"nombre": r["nombre"], "poderGobierno": r.get("poder_gobierno")}
-        for r in (resp.data or [])
-    ]
-
-    return jsonify(data)
+# /instituciones-confirmadas fue eliminado: su lógica vive en /bootstrap-codigos.
 
 
 @app.route("/guardar-validacion-codigos", methods=["POST"])
@@ -492,31 +474,60 @@ def enviar_validacion():
     estado = session["estado"]
     db     = get_supabase_autenticado()
 
-    # ── Datos para el acuse ────────────────────────────────────
-    resp_entes   = db.table("entes_confirmados") \
+    # ── F2-04: verificar cobertura completa ────────────────────
+    # Traer todos los entes confirmados del estado.
+    resp_entes = db.table("entes_confirmados") \
         .select("nombre").eq("estado", estado).eq("confirmado", True).execute()
-    resp_codigos = db.table("codigos_etica") \
-        .select("nombre").eq("estado", estado).execute()
 
     if not resp_entes.data:
         return jsonify({"error": "No hay entes validados"}), 400
 
-    total_instituciones     = len(resp_entes.data)
-    instituciones_validadas = [r["nombre"] for r in (resp_codigos.data or [])]
-    total_codigos           = len(instituciones_validadas)
+    nombres_entes = {r["nombre"] for r in resp_entes.data}
 
-    # ── Cerrar proceso ─────────────────────────────────────────
-    db.table("estados_proceso").upsert({
-        "estado":     estado,
-        "cerrado":    True,
-        "cerrado_en": datetime.now().isoformat()
-    }).execute()
+    # Solo cuentan los registros donde el usuario explícitamente respondió
+    # "Sí" — los demás (No / No se recibió información) no son "validados".
+    resp_codigos = db.table("codigos_etica") \
+        .select("nombre, cuenta_codigo") \
+        .eq("estado", estado).execute()
 
-    # ── Descargar imagen de fondo ──────────────────────────────
-    url_fondo   = supabase.storage.from_(STORAGE_BUCKET).get_public_url(FONDO_STORAGE)
-    fondo_bytes = io.BytesIO(requests.get(url_fondo).content)
+    codigos_data       = resp_codigos.data or []
+    nombres_revisados  = {r["nombre"] for r in codigos_data}
+    instituciones_con_si = [
+        r["nombre"] for r in codigos_data
+        if (r.get("cuenta_codigo") or "").strip() == "Sí"
+    ]
 
-    # ── Construir PDF con ReportLab ────────────────────────────
+    # Bloquear envío si algún ente confirmado no tiene registro en codigos_etica.
+    sin_revisar = nombres_entes - nombres_revisados
+    if sin_revisar:
+        return jsonify({
+            "error": "Revisión incompleta",
+            "sin_revisar": sorted(sin_revisar),
+        }), 400
+
+    total_instituciones = len(nombres_entes)
+    total_con_si        = len(instituciones_con_si)
+
+    # ── F2-05 paso 1: descargar imagen de fondo (con fallback local) ──
+    # La imagen se obtiene de Supabase Storage; si falla por cualquier
+    # razón (bucket ausente, red, etc.) se usa el archivo local como
+    # respaldo para que el PDF sí pueda generarse.
+    RUTA_FONDO_LOCAL = os.path.join(app.root_path, "static", "assets", FONDO_STORAGE)
+    fondo_bytes = None
+
+    try:
+        url_fondo = supabase.storage.from_(STORAGE_BUCKET).get_public_url(FONDO_STORAGE)
+        resp_img  = requests.get(url_fondo, timeout=(CONNECT_TIMEOUT, READ_TIMEOUT))
+        resp_img.raise_for_status()
+        fondo_bytes = io.BytesIO(resp_img.content)
+    except Exception:
+        if os.path.exists(RUTA_FONDO_LOCAL):
+            with open(RUTA_FONDO_LOCAL, "rb") as f:
+                fondo_bytes = io.BytesIO(f.read())
+        # Si tampoco existe el fallback local, fondo_bytes queda None
+        # y el PDF se genera sin imagen de fondo (mejor que fallar).
+
+    # ── F2-05 paso 2: construir PDF con ReportLab ──────────────
     nombre_pdf = f"acuse_codigos_etica_{normalizar_texto(estado)}.pdf"
     buffer     = io.BytesIO()
 
@@ -526,7 +537,7 @@ def enviar_validacion():
         topMargin=120, bottomMargin=72
     )
 
-    styles       = getSampleStyleSheet()
+    styles        = getSampleStyleSheet()
     estilo_titulo = ParagraphStyle(
         "Titulo",
         parent=styles["Heading1"],
@@ -538,23 +549,23 @@ def enviar_validacion():
 
     elements = [
         Paragraph("ACUSE", estilo_titulo),
-        Paragraph(f"<b>Estado:</b> {estado}",                                  styles["Normal"]),
-        Paragraph(f"<b>Fecha:</b> {datetime.now().strftime('%d/%m/%Y %H:%M')}", styles["Normal"]),
+        Paragraph(f"<b>Estado:</b> {estado}",                                   styles["Normal"]),
+        Paragraph(f"<b>Fecha:</b> {datetime.now().strftime('%d/%m/%Y %H:%M')}",  styles["Normal"]),
         Spacer(1, 0.3 * inch),
-        Paragraph(f"<b>Instituciones reportadas:</b> {total_instituciones}",    styles["Normal"]),
-        Paragraph(f"<b>Códigos de Ética validados:</b> {total_codigos}",        styles["Normal"]),
+        Paragraph(f"<b>Instituciones confirmadas:</b> {total_instituciones}",    styles["Normal"]),
+        Paragraph(f"<b>Instituciones con Código de Ética (Sí):</b> {total_con_si}", styles["Normal"]),
         Spacer(1, 0.4 * inch),
-        Paragraph("<b>Instituciones con Código Validado:</b>",                  styles["Heading3"]),
+        Paragraph("<b>Instituciones con Código de Ética publicado:</b>",         styles["Heading3"]),
         Spacer(1, 0.2 * inch),
     ]
 
-    if instituciones_validadas:
+    if instituciones_con_si:
         elements.append(ListFlowable(
-            [ListItem(Paragraph(n, styles["Normal"])) for n in instituciones_validadas],
+            [ListItem(Paragraph(n, styles["Normal"])) for n in sorted(instituciones_con_si)],
             bulletType="bullet"
         ))
     else:
-        elements.append(Paragraph("No se registraron códigos validados.", styles["Normal"]))
+        elements.append(Paragraph("Ninguna institución reportó contar con código.", styles["Normal"]))
 
     elements += [
         Spacer(1, 0.5 * inch),
@@ -562,7 +573,10 @@ def enviar_validacion():
     ]
 
     def dibujar_fondo(canvas, doc):
-        """Dibuja la imagen de fondo en cada página del PDF."""
+        """Dibuja la imagen de fondo si está disponible; si no, omite sin error."""
+        if not fondo_bytes:
+            return
+        fondo_bytes.seek(0)
         w, h = LETTER
         canvas.drawImage(
             ImageReader(fondo_bytes), 0, 0,
@@ -572,14 +586,27 @@ def enviar_validacion():
 
     doc.build(elements, onFirstPage=dibujar_fondo, onLaterPages=dibujar_fondo)
 
-    # ── Subir a Supabase Storage ───────────────────────────────
-    supabase_admin.storage.from_(STORAGE_BUCKET).upload(
-        path=nombre_pdf,
-        file=buffer.getvalue(),
-        file_options={"content-type": "application/pdf", "upsert": "true"}
-    )
+    # ── F2-05 paso 3: subir PDF a Supabase Storage ─────────────
+    # Si la subida falla, el proceso NO se marca como cerrado
+    # y se devuelve error para que el usuario pueda reintentar.
+    try:
+        supabase_admin.storage.from_(STORAGE_BUCKET).upload(
+            path=nombre_pdf,
+            file=buffer.getvalue(),
+            file_options={"content-type": "application/pdf", "upsert": "true"}
+        )
+        url_pdf = supabase_admin.storage.from_(STORAGE_BUCKET).get_public_url(nombre_pdf)
+    except Exception as e:
+        return jsonify({"error": f"No se pudo subir el acuse: {e}"}), 502
 
-    url_pdf = supabase_admin.storage.from_(STORAGE_BUCKET).get_public_url(nombre_pdf)
+    # ── F2-05 paso 4: cerrar proceso SOLO si el PDF está disponible ──
+    db.table("estados_proceso").upsert({
+        "estado":     estado,
+        "cerrado":    True,
+        "cerrado_en": datetime.now().isoformat()
+    }).execute()
+
+    invalidar_cache()
     return jsonify({"status": "ok", "pdf": url_pdf})
 
 # ==============================================================
@@ -675,7 +702,12 @@ def bootstrap_codigos():
 @app.route("/proceso-cerrado")
 @login_required
 def proceso_cerrado_endpoint():
-    """Consulta puntual sobre si el proceso del estado activo está cerrado."""
+    """
+    Consulta puntual sobre si el proceso del estado activo esta cerrado.
+    Reutilizable desde cualquier vista (validar_instituciones, validar_codigos).
+    Los bootstraps ya incluyen este dato; este endpoint sirve para re-verificar
+    el estado en tiempo real sin recargar todo el bootstrap.
+    """
     db     = get_supabase_autenticado()
     estado = session["estado"]
     return jsonify({"cerrado": _proceso_cerrado(db, estado)})
@@ -695,8 +727,33 @@ def _proceso_cerrado(db, estado: str) -> bool:
     return bool(resp.data and resp.data[0].get("cerrado"))
 
 # ==============================================================
+# HEALTH CHECKS
+# /healthz → liveness:  el proceso está corriendo
+# /readyz  → readiness: el proceso puede atender tráfico
+#            (verifica conexión a Supabase)
+# ==============================================================
+
+@app.route("/healthz")
+def healthz():
+    return jsonify({"status": "ok"}), 200
+
+
+@app.route("/readyz")
+def readyz():
+    try:
+        create_client(SUPABASE_URL, SUPABASE_KEY, options=_SB_OPTIONS) \
+            .table("instituciones").select("id").limit(1).execute()
+        return jsonify({"status": "ok", "supabase": "reachable"}), 200
+    except Exception as e:
+        return jsonify({"status": "error", "supabase": str(e)}), 503
+
+
+# ==============================================================
 # ARRANQUE
 # ==============================================================
 
 if __name__ == "__main__":
-    app.run(debug=False)
+    debug = os.environ.get("FLASK_DEBUG", "0") == "1"
+    host  = os.environ.get("HOST", "0.0.0.0")
+    port  = int(os.environ.get("PORT", 5000))
+    app.run(host=host, port=port, debug=debug)
