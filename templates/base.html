@@ -45,6 +45,7 @@ const Loader = {
             <a href="{{ url_for('login') }}" class="btn-login">Iniciar sesión</a>
         {% else %}
             <span class="estado-label">{{ estado }}</span>
+            <a href="{{ url_for('home') }}" class="btn-login secondary">Inicio</a>
             <a href="{{ url_for('menu') }}" class="btn-login secondary">Menú</a>
             <a href="{{ url_for('logout') }}" class="btn-login secondary">Cerrar sesión</a>
         {% endif %}

@@ -1,7 +1,7 @@
 from dotenv import load_dotenv
 load_dotenv()
 
-from flask import Flask, render_template, request, jsonify, session, redirect, url_for
+from flask import Flask, render_template, request, jsonify, session, redirect, url_for, Response
 import os, io, re, time, unicodedata, requests
 from functools import wraps
 from datetime import datetime
@@ -328,6 +328,114 @@ def validar_instituciones():
         estado=session.get("estado")
     )
 
+@app.route("/descarga/instituciones")
+@login_required  
+def descarga_instituciones():
+    estado = session["estado"]
+    db = get_supabase_autenticado()
+
+    # Intentar datos guardados primero
+    resp = db.table("entes_confirmados") \
+        .select("nombre, poder_gobierno, confirmado") \
+        .eq("estado", estado) \
+        .execute()
+
+    # Si no hay guardados, usar catálogo base
+    if not resp.data:
+        resp_base = db.table("instituciones") \
+            .select("nombre, poder_gobierno") \
+            .eq("entidad_nombre", estado) \
+            .execute()
+        filas_data = [
+            {
+                "nombre":         r.get("nombre", ""),
+                "poder_gobierno": r.get("poder_gobierno", ""),
+                "confirmado":     None  # aún no verificado
+            }
+            for r in (resp_base.data or [])
+        ]
+        filename = "instituciones_catalogo.csv"
+    else:
+        filas_data = resp.data
+        filename   = "instituciones_verificadas.csv"
+
+    def generar():
+        yield "\uFEFF"
+        encabezado = ["Nombre", "Poder de Gobierno", "Confirmado"]
+        yield ",".join(f'"{c}"' for c in encabezado) + "\n"
+        for r in filas_data:
+            confirmado = r.get("confirmado")
+            fila = [
+                r.get("nombre", ""),
+                r.get("poder_gobierno", ""),
+                "Sí" if confirmado is True else ("No" if confirmado is False else "Sin verificar")
+            ]
+            yield ",".join(f'"{str(c).replace(chr(34), chr(34)*2)}"' for c in fila) + "\n"
+
+    return Response(
+        generar(),
+        mimetype="text/csv",
+        headers={"Content-Disposition": f"attachment; filename={filename}"}
+    )
+
+
+@app.route("/descarga/codigos")
+@login_required
+def descarga_codigos():
+    estado = session["estado"]
+    db = get_supabase_autenticado()
+
+    # Intentar datos guardados primero
+    resp = db.table("codigos_etica") \
+        .select("nombre, cuenta_codigo, link, fecha_publicacion, cumple_lineamientos, num_instituciones") \
+        .eq("estado", estado) \
+        .execute()
+
+    # Si no hay guardados, usar instituciones confirmadas como base
+    if not resp.data:
+        resp_base = db.table("entes_confirmados") \
+            .select("nombre") \
+            .eq("estado", estado) \
+            .eq("confirmado", True) \
+            .execute()
+        filas_data = [
+            {
+                "nombre":              r.get("nombre", ""),
+                "cuenta_codigo":       "",
+                "link":                "",
+                "fecha_publicacion":   "",
+                "cumple_lineamientos": "",
+                "num_instituciones":   "",
+            }
+            for r in (resp_base.data or [])
+        ]
+        filename = "codigos_etica_sin_datos.csv"
+    else:
+        filas_data = resp.data
+        filename   = "codigos_etica_cotejo.csv"
+
+    def generar():
+        yield "\uFEFF"
+        encabezado = ["Institución", "¿Cuenta con código?", "Liga",
+                      "Fecha de publicación", "¿Cumple lineamientos?",
+                      "Núm. instituciones obligadas"]
+        yield ",".join(f'"{c}"' for c in encabezado) + "\n"
+        for r in filas_data:
+            fila = [
+                r.get("nombre", ""),
+                r.get("cuenta_codigo", ""),
+                r.get("link", ""),
+                r.get("fecha_publicacion", "") or "",
+                r.get("cumple_lineamientos", ""),
+                str(r.get("num_instituciones", "") or ""),
+            ]
+            yield ",".join(f'"{str(c).replace(chr(34), chr(34)*2)}"' for c in fila) + "\n"
+
+    return Response(
+        generar(),
+        mimetype="text/csv",
+        headers={"Content-Disposition": f"attachment; filename={filename}"}
+    )
 
 # /instituciones-base fue eliminado: su lógica vive en /bootstrap-instituciones.
 

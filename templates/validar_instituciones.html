@@ -64,6 +64,10 @@
     <img src="{{ url_for('static', filename='assets/icons/save.svg')}}">
 </button>
 
+<button type="button" onclick="window.location.href='/descarga/instituciones'" class="btn-guardar">
+    Descargar instituciones
+</button>
+
 <button type="button" onclick="irAValidarCodigos()" class="btn-validar">
     Verificar Códigos de Ética
     <img src="{{ url_for('static', filename='assets/icons/arrow_forward.svg')}}">
@@ -166,7 +170,7 @@ function crearFila(fila, formulario, esNueva = false) {
 
     div.innerHTML = `
         <p>
-            <strong>Estatus:</strong>
+            <strong>Estatus del Código de Ética:</strong>
             <span class="badge pendiente">Pendiente de verificación</span>
         </p>
 
