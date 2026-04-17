@@ -53,7 +53,11 @@ body {
     font-family: var(--font-body);
     background-color: var(--color-bg-main);
     color: var(--color-text-secondary);
+    display: flex;
+    flex-direction: column;
+    min-height: 100vh;
 }
+
 
 /* =====================================================
    TIPOGRAFÍA
@@ -290,6 +294,7 @@ h4 {
     background-color: var(--color-bg-soft);
     text-align: center;
     padding: 60px 0;
+    flex: 1;  /* ← esta línea es la clave */
 }
 
 .menu-title {

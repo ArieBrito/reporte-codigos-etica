@@ -18,11 +18,34 @@
     <button type="button" data-poder="Autonomo" onclick="filtrar('Autonomo')">Organismos Autónomos</button>
     <button type="button" data-poder="Municipio" onclick="filtrar('Municipio')">Municipios</button>
     <button type="button" data-poder="TODOS" onclick="filtrar('TODOS')">Mostrar todos</button>
+    <input
+        type="text"
+        id="buscador"
+        placeholder="Buscar institución..."
+        oninput="aplicarFiltros()"
+        autocomplete="off"
+    >
+    <span id="buscador-contador"></span>
 </div>
 
 <br>
 
 <form id="formulario-dinamico"></form>
+
+<div id="paginacion" style="display:none; margin: 20px 0; align-items:center; gap:8px; flex-wrap:wrap;">
+    <button type="button" id="btn-anterior" onclick="cambiarPagina(-1)">← Anterior</button>
+    <span id="paginacion-info" style="font-size:14px; color:#555;"></span>
+    <button type="button" id="btn-siguiente" onclick="cambiarPagina(1)">Siguiente →</button>
+    <span style="margin-left:16px; font-size:13px; color:#888;">Mostrar
+        <select id="por-pagina" onchange="cambiarPorPagina()" style="padding:3px 6px; font-size:13px;">
+            <option value="10" selected>10</option>
+            <option value="20">20</option>
+            <option value="50">50</option>
+            <option value="9999">Todos</option>
+        </select>
+        por página
+    </span>
+</div>
 
 <br>
 
@@ -54,6 +77,8 @@
 let filasOriginales = {};
 let poderActivo = 'TODOS';
 let hayCambiosPendientes = false;
+let paginaActual = 1;
+let porPagina = 10;
 
 /* =======================
    CARGA INICIAL (bootstrap)
@@ -191,20 +216,92 @@ function crearFila(fila, formulario, esNueva = false) {
 
 /* =======================
    FILTRADO
+   Actualiza la pestaña activa y delega a renderPagina.
 ======================= */
 function filtrar(poder) {
     poderActivo = poder;
-
-    document.querySelectorAll('.form-group').forEach(div => {
-        div.style.display =
-            poder === 'TODOS' || div.dataset.poder === poder
-            ? 'block' : 'none';
-    });
+    paginaActual = 1;
 
     const tabs = document.getElementById('tabs');
     tabs.querySelectorAll('button').forEach(btn => btn.classList.remove('activo'));
     const botonActivo = tabs.querySelector(`[data-poder="${poder}"]`);
     if (botonActivo) botonActivo.classList.add('activo');
+
+    renderPagina();
+}
+
+/* =======================
+   BÚSQUEDA (llamada desde oninput del buscador)
+======================= */
+function aplicarFiltros() {
+    paginaActual = 1;
+    renderPagina();
+}
+
+/* =======================
+   PAGINACIÓN
+   Única función que decide qué cards son visibles.
+   Combina filtro de poder + texto de búsqueda.
+======================= */
+function renderPagina() {
+    const query = ((document.getElementById('buscador') || {}).value || '')
+        .normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().trim();
+
+    const todas     = Array.from(document.querySelectorAll('.form-group'));
+    const coinciden = todas.filter(div => {
+        const coincidePoder    = poderActivo === 'TODOS' || div.dataset.poder === poderActivo;
+        const nombreNorm       = (div.dataset.nombre || '').normalize('NFD')
+                                  .replace(/[̀-ͯ]/g, '').toLowerCase();
+        const coincideBusqueda = !query || nombreNorm.includes(query);
+        return coincidePoder && coincideBusqueda;
+    });
+
+    const total       = coinciden.length;
+    const totalPags   = porPagina >= 9999 ? 1 : Math.max(1, Math.ceil(total / porPagina));
+    if (paginaActual > totalPags) paginaActual = totalPags;
+
+    const inicio   = (paginaActual - 1) * porPagina;
+    const fin      = porPagina >= 9999 ? total : inicio + porPagina;
+    const enPagina = new Set(coinciden.slice(inicio, fin));
+
+    todas.forEach(div => { div.style.display = enPagina.has(div) ? 'block' : 'none'; });
+
+    // Controles de paginación
+    const paginacion = document.getElementById('paginacion');
+    paginacion.style.display = 'flex';
+
+    document.getElementById('btn-anterior').disabled  = paginaActual <= 1;
+    document.getElementById('btn-siguiente').disabled = paginaActual >= totalPags;
+
+    const desde = total === 0 ? 0 : inicio + 1;
+    const hasta  = Math.min(fin, total);
+    document.getElementById('paginacion-info').textContent =
+        total === 0
+            ? 'Sin resultados'
+            : `${desde}–${hasta} de ${total} institución${total !== 1 ? 'es' : ''}`;
+
+    // Contador del buscador
+    const contador = document.getElementById('buscador-contador');
+    if (contador) {
+        if (query) {
+            contador.textContent  = `${total} resultado${total !== 1 ? 's' : ''}`;
+            contador.style.display = 'inline';
+        } else {
+            contador.style.display = 'none';
+        }
+    }
+}
+
+function cambiarPagina(delta) {
+    paginaActual += delta;
+    renderPagina();
+    document.getElementById('tabs').scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+function cambiarPorPagina() {
+    porPagina    = parseInt(document.getElementById('por-pagina').value);
+    paginaActual = 1;
+    renderPagina();
 }
 
 /* =======================
@@ -221,8 +318,22 @@ function agregarEntrada() {
 
     filasOriginales[nuevoId] = fila;
     crearFila(fila, document.getElementById('formulario-dinamico'), true);
-    filtrar(poderActivo);
     hayCambiosPendientes = true;
+
+    // Ir a la última página del filtro activo, donde quedó la nueva fila
+    const coinciden = Array.from(document.querySelectorAll('.form-group'))
+        .filter(div => div.dataset.poder === poderActivo);
+    const totalPags = porPagina >= 9999 ? 1 : Math.max(1, Math.ceil(coinciden.length / porPagina));
+    paginaActual = totalPags;
+
+    renderPagina();
+
+    // Enfocar el input para que el usuario escriba de inmediato
+    const nuevaFila = document.querySelector(`.form-group[data-id="${nuevoId}"]`);
+    if (nuevaFila) {
+        nuevaFila.querySelector('input').focus();
+        nuevaFila.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
 }
 
 /* =======================

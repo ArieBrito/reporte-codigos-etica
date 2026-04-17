@@ -200,7 +200,7 @@ def login():
             session["access_token"]  = resp.session.access_token
             session["refresh_token"] = resp.session.refresh_token
 
-            return redirect(url_for("home"))
+            return redirect(url_for("menu"))
 
         except Exception:
             return render_template("login.html", error="Credenciales inválidas")
@@ -240,6 +240,15 @@ def resultados():
         estado=session.get("estado"),
         supabase_url=SUPABASE_URL,
         supabase_key=SUPABASE_KEY
+    )
+
+@app.route("/menu")
+@login_required
+def menu():
+    return render_template(
+        "menu.html",
+        usuario=session.get("usuario"),
+        estado=session.get("estado")
     )
 
 # ==============================================================
