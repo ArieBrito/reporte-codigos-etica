@@ -14,7 +14,7 @@
         <a href="{{ url_for('home') }}" class="btn-home">
          ← Inicio
         </a>
-        <h1>Tablero de Códigos de Ética</h1>
+        <h1>Dashboard de Códigos de Ética</h1>
 
     </div>
 
@@ -33,30 +33,25 @@
         </div>
     </div>
 
-    <div class="grid">
-        <div class="panel">
-            <h3>Códigos acumulados por año</h3>
-            <canvas id="graficoLinea"></canvas>
-        </div>
-        <div class="panel">
-            <h3>Porcentaje de cumplimiento por entidad</h3>
-            <div id="mapa"></div>
-        </div>
+    <div class="panel" style="margin-bottom:30px;">
+        <h3>Códigos acumulados por año</h3>
+        <canvas id="graficoLinea" style="max-height:320px;"></canvas>
+    </div>
+
+    <div class="panel" style="margin-bottom:30px;">
+        <h3>Porcentaje de cumplimiento por entidad</h3>
+        <div id="mapa"></div>
     </div>
 
     <div class="panel">
-        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;">
-            <h3 style="margin:0;">Resumen por entidad</h3>
-            <button onclick="descargarCSV()" class="btn-descarga">⬇ Descargar datos</button>
-        </div>
+        <h3>Resumen por entidad</h3>
         <table id="tablaEstados">
             <thead>
                 <tr>
-                    <th></th>
                     <th>Entidad</th>
-                    <th>Instituciones emisoras</th>
+                    <th>Instituciones que emiten Códigos</th>
                     <th>Códigos con liga registrada</th>
-                    <th>Instituciones sujetas</th>
+                    <th>Instituciones obligadas</th>
                 </tr>
             </thead>
             <tbody></tbody>
@@ -136,118 +131,15 @@ function renderizarTabla(datos) {
     tbody.innerHTML = "";
 
     datos.estados.forEach(e => {
-        const idEstado = e.entidad.replace(/\s+/g, "_");
-
         const tr = document.createElement("tr");
-        tr.className = "fila-estado";
         tr.innerHTML = `
-            <td><button class="btn-expandir" onclick="toggleDetalle('${idEstado}')">▶</button></td>
-            <td><strong>${e.entidad}</strong></td>
+            <td>${e.entidad}</td>
             <td>${e.instituciones}</td>
             <td>${e.codigos_con_link}</td>
             <td>${e.num_obligadas}</td>
         `;
         tbody.appendChild(tr);
-
-        const trDetalle = document.createElement("tr");
-        trDetalle.id = `detalle_${idEstado}`;
-        trDetalle.style.display = "none";
-        const detalle = (e.detalle || []);
-        trDetalle.innerHTML = `
-            <td colspan="5" style="padding:0;">
-                <table class="tabla-detalle">
-                    <thead><tr>
-                        <th>Institución</th>
-                        <th>¿Cuenta con código?</th>
-                        <th>Liga</th>
-                        <th>Fecha de publicación</th>
-                    </tr></thead>
-                    <tbody>
-                        ${detalle.map(inst => `
-                            <tr>
-                                <td>${inst.nombre}</td>
-                                <td>${inst.cuenta || '—'}</td>
-                                <td>${inst.link ? `<a href="${inst.link}" target="_blank">Ver enlace</a>` : '—'}</td>
-                                <td>${inst.fecha || '—'}</td>
-                            </tr>
-                        `).join('')}
-                    </tbody>
-                </table>
-            </td>
-        `;
-        tbody.appendChild(trDetalle);
     });
-}
-
-function toggleDetalle(idEstado) {
-    const fila    = document.getElementById(`detalle_${idEstado}`);
-    const btn     = fila.previousElementSibling.querySelector('.btn-expandir');
-    const visible = fila.style.display !== "none";
-    fila.style.display = visible ? "none" : "table-row";
-    btn.textContent    = visible ? "▶" : "▼";
-}
-
-function descargarCSV() {
-    fetch("/api/resultados")
-        .then(r => r.json())
-        .then(datos => {
-            const encResumen = [
-                "Entidad",
-                "Instituciones que emiten Códigos",
-                "Códigos con liga registrada",
-                "Instituciones obligadas",
-                "Porcentaje de cumplimiento (%)"
-            ];
-            const filasResumen = datos.estados.map(e => {
-                const pct = e.instituciones > 0
-                    ? ((e.codigos_con_si / e.instituciones) * 100).toFixed(1)
-                    : "0.0";
-                return [e.entidad, e.instituciones, e.codigos_con_link, e.num_obligadas, pct];
-            });
-            descargarArchivoCSV([encResumen, ...filasResumen], "resumen_codigos_etica.csv");
-
-            const encDetalle = [
-                "Entidad",
-                "Institución",
-                "¿Cuenta con código de ética?",
-                "Liga de publicación",
-                "Fecha de publicación"
-            ];
-            const filasDetalle = [];
-            datos.estados.forEach(e => {
-                (e.detalle || []).forEach(inst => {
-                    filasDetalle.push([
-                        e.entidad,
-                        inst.nombre,
-                        inst.cuenta || "",
-                        inst.link   || "",
-                        inst.fecha  || ""
-                    ]);
-                });
-            });
-            setTimeout(() => descargarArchivoCSV(
-                [encDetalle, ...filasDetalle],
-                "detalle_instituciones_codigos_etica.csv"
-            ), 300);
-        });
-}
-
-function descargarArchivoCSV(filas, nombreArchivo) {
-    const BOM      = "\uFEFF";
-    const contenido = BOM + filas
-        .map(fila => fila
-            .map(celda => `"${String(celda).replace(/"/g, '""')}"`)
-            .join(","))
-        .join("\n");
-    const blob = new Blob([contenido], { type: "text/csv;charset=utf-8;" });
-    const url  = URL.createObjectURL(blob);
-    const a    = document.createElement("a");
-    a.href = url;
-    a.download = nombreArchivo;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
 }
 
 async function renderizarMapa(datos) {
@@ -317,7 +209,7 @@ async function renderizarMapa(datos) {
         },
         margin:        { t: 0, b: 0, l: 0, r: 0 },
         paper_bgcolor: "white",
-        height:        400,
+        height:        480,
     };
 
     Plotly.react("mapa", [trace], layout, { responsive: true, displayModeBar: false });
