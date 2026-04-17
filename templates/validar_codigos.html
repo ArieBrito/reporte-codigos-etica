@@ -44,7 +44,7 @@ MODAL DE CONFIRMACIÓN
       <p>Al enviar la información:</p>
 
       <ul>
-        <li>Se generará un <b>acuse oficial</b></li>
+        <li>Se generará un <b>acuse</b></li>
         <li>No podrás <b>editar nuevamente</b></li>
       </ul>
 
@@ -117,7 +117,7 @@ function actualizarDependencias(card) {
    CARGA INICIAL
 ========================================= */
 
-Loader.show("Cargando códigos de ética...");
+Loader.show("Cargando códigos de ética");
 fetch('/bootstrap-codigos')
 .then(r => r.json())
 .then(boot => {
@@ -302,7 +302,7 @@ function guardarTodo() {
         payload.push({ nombre: nombreOriginal, cuenta_codigo: cuenta, link, fecha_publicacion: fecha, cumple_lineamientos: cumple, num_instituciones: num });
     });
 
-    Loader.show("Guardando información...");
+    Loader.show("Guardando información");
     fetch('/guardar-validacion-codigos', {
         method:  'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -338,7 +338,7 @@ function cerrarConfirm(){
 ========================================= */
 function confirmarEnvio(){
     cerrarConfirm();
-    Loader.show("Generando acuse oficial...");
+    Loader.show("Generando acuse");
 
     fetch('/enviar-validacion', { method: 'POST' })
     .then(r => r.json())

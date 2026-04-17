@@ -21,7 +21,7 @@
     <input
         type="text"
         id="buscador"
-        placeholder="Buscar institución..."
+        placeholder="Buscar institución"
         oninput="aplicarFiltros()"
         autocomplete="off"
     >
@@ -87,7 +87,7 @@ let porPagina = 10;
 /* =======================
    CARGA INICIAL (bootstrap)
 ======================= */
-Loader.show("Cargando instituciones...");
+Loader.show("Cargando instituciones");
 fetch('/bootstrap-instituciones')
     .then(r => r.json())
     .then(boot => {
@@ -367,7 +367,7 @@ function guardarValidacion() {
         return;
     }
 
-    Loader.show("Guardando verificación...");
+    Loader.show("Guardando verificación");
     fetch('/guardar-validacion', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -391,7 +391,7 @@ function irAValidarCodigos() {
         return;
     }
 
-    Loader.show("Verificando entes confirmados...");
+    Loader.show("Verificando entes confirmados");
     fetch('/hay-entes-confirmados')
         .then(r => r.json())
         .then(resp => {

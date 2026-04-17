@@ -294,7 +294,7 @@ h4 {
     background-color: var(--color-bg-soft);
     text-align: center;
     padding: 60px 0;
-    flex: 1;  /* ← esta línea es la clave */
+    flex: 1; 
 }
 
 .menu-title {
@@ -326,7 +326,7 @@ h4 {
     box-shadow: var(--shadow-medium);
 }
 
-/* Métricas (dashboard) */
+/* Métricas (tablero) */
 .card-metric {
     flex: 1;
     background: white;
@@ -722,6 +722,19 @@ tr:hover { background: #fafafa; }
     color: #A11C3A;
     text-align: center;
     letter-spacing: 0.01em;
+}
+
+/* =====================================================
+   footer
+===================================================== */
+
+.footer-version {
+    text-align: center;
+    font-size: 11px;
+    color: #aaa;
+    padding: 12px;
+    margin-top: 40px;
+    border-top: 1px solid #eee;
 }
 
 /* =====================================================
