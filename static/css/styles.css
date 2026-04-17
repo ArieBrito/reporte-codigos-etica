@@ -672,6 +672,58 @@ tr:hover { background: #fafafa; }
 
 .warning { color: #c0392b; font-weight: bold; }
 
+/* =============================================
+   LOADER OVERLAY
+============================================= */
+#loader-overlay {
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.45);
+    z-index: 9999;
+    align-items: center;
+    justify-content: center;
+    backdrop-filter: blur(2px);
+}
+
+#loader-overlay.activo {
+    display: flex;
+}
+
+.loader-box {
+    background: #fff;
+    border-radius: 12px;
+    padding: 36px 48px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 20px;
+    box-shadow: 0 8px 32px rgba(0,0,0,0.18);
+    min-width: 220px;
+}
+
+.loader-spinner {
+    width: 48px;
+    height: 48px;
+    border: 5px solid #F5F0F1;
+    border-top-color: #A11C3A;
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+    to { transform: rotate(360deg); }
+}
+
+#loader-mensaje {
+    margin: 0;
+    font-size: 15px;
+    font-weight: 600;
+    color: #A11C3A;
+    text-align: center;
+    letter-spacing: 0.01em;
+}
+
 /* =====================================================
    RESPONSIVE
 ===================================================== */

@@ -9,32 +9,49 @@
 
 <body class="{% block body_class %}{% endblock %}">
 
-<header class="header">
+<!-- =============================================
+     OVERLAY DE CARGA GLOBAL
+     Uso desde cualquier vista:
+       Loader.show("Mensaje...")
+       Loader.hide()
+============================================= -->
+<div id="loader-overlay" aria-live="polite" aria-busy="true" role="status">
+    <div class="loader-box">
+        <div class="loader-spinner"></div>
+        <p id="loader-mensaje">Cargando...</p>
+    </div>
+</div>
 
+<script>
+const Loader = {
+    overlay:  document.getElementById("loader-overlay"),
+    mensaje:  document.getElementById("loader-mensaje"),
+    show(msg = "Cargando...") {
+        this.mensaje.textContent = msg;
+        this.overlay.classList.add("activo");
+    },
+    hide() {
+        this.overlay.classList.remove("activo");
+    }
+};
+</script>
+
+<header class="header">
     <a href="{{ url_for('home') }}">
         <img src="{{ url_for('static', filename='assets/logo/logo.svg') }}" class="logo">
     </a>
-
     <div class="header-actions">
         {% if not usuario %}
-            <a href="{{ url_for('login') }}" class="btn-login">
-                Iniciar sesión
-            </a>
+            <a href="{{ url_for('login') }}" class="btn-login">Iniciar sesión</a>
         {% else %}
             <span class="estado-label">{{ estado }}</span>
-            <a href="{{ url_for('menu') }}" class="btn-login secondary">
-                Menú
-            </a>            
-            <a href="{{ url_for('logout') }}" class="btn-login secondary">
-                Cerrar sesión
-            </a>
+            <a href="{{ url_for('menu') }}" class="btn-login secondary">Menú</a>
+            <a href="{{ url_for('logout') }}" class="btn-login secondary">Cerrar sesión</a>
         {% endif %}
     </div>
-
 </header>
 
-{% block content %}
-{% endblock %}
+{% block content %}{% endblock %}
 
 </body>
 </html>

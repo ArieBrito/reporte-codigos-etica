@@ -83,6 +83,7 @@ let porPagina = 10;
 /* =======================
    CARGA INICIAL (bootstrap)
 ======================= */
+Loader.show("Cargando instituciones...");
 fetch('/bootstrap-instituciones')
     .then(r => r.json())
     .then(boot => {
@@ -146,7 +147,8 @@ fetch('/bootstrap-instituciones')
             document.querySelector('.inst-container').prepend(aviso);
         }
     })
-    .catch(err => console.error('Bootstrap error:', err));
+    .catch(err => console.error('Bootstrap error:', err))
+    .finally(() => Loader.hide());
 
 /* =======================
    CREAR FILA
@@ -361,6 +363,7 @@ function guardarValidacion() {
         return;
     }
 
+    Loader.show("Guardando verificación...");
     fetch('/guardar-validacion', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -371,7 +374,8 @@ function guardarValidacion() {
         hayCambiosPendientes = false;
         alert('Información guardada correctamente');
     })
-    .catch(() => alert('Error al guardar'));
+    .catch(() => alert('Error al guardar'))
+    .finally(() => Loader.hide());
 }
 
 /* =======================
@@ -383,15 +387,18 @@ function irAValidarCodigos() {
         return;
     }
 
+    Loader.show("Verificando entes confirmados...");
     fetch('/hay-entes-confirmados')
         .then(r => r.json())
         .then(resp => {
             if (!resp.hay) {
                 alert('Primero confirma al menos una institución');
+                Loader.hide();
                 return;
             }
             window.location.href = '/validar-codigos';
-        });
+        })
+        .catch(() => Loader.hide());
 }
 </script>
 
