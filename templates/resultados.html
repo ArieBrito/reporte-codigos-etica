@@ -44,14 +44,19 @@
     </div>
 
     <div class="panel">
-        <h3>Resumen por entidad</h3>
+        <div class="panel-header">
+            <h3>Resumen por entidad</h3>
+            <button onclick="descargarCSV()" class="btn-descarga">⬇ Descargar datos</button>
+        </div>
+
         <table id="tablaEstados">
             <thead>
                 <tr>
+                    <th></th>
                     <th>Entidad</th>
-                    <th>Instituciones que emiten Códigos</th>
+                    <th>Instituciones emisoras</th>
                     <th>Códigos con liga registrada</th>
-                    <th>Instituciones obligadas</th>
+                    <th>Instituciones destinatarias</th>
                 </tr>
             </thead>
             <tbody></tbody>
@@ -131,17 +136,49 @@ function renderizarTabla(datos) {
     tbody.innerHTML = "";
 
     datos.estados.forEach(e => {
+        const idEstado = e.entidad.replace(/\s+/g, "_");
+
         const tr = document.createElement("tr");
+        tr.className = "fila-estado";
         tr.innerHTML = `
-            <td>${e.entidad}</td>
+            <td><button class="btn-expandir" onclick="toggleDetalle('${idEstado}')">▶</button></td>
+            <td><strong>${e.entidad}</strong></td>
             <td>${e.instituciones}</td>
             <td>${e.codigos_con_link}</td>
             <td>${e.num_obligadas}</td>
         `;
         tbody.appendChild(tr);
+
+        const trDetalle = document.createElement("tr");
+        trDetalle.id = `detalle_${idEstado}`;
+        trDetalle.style.display = "none";
+        const detalle = (e.detalle || []);
+        trDetalle.innerHTML = `
+            <td colspan="5" style="padding:0;">
+                <table class="tabla-detalle">
+                    <thead><tr>
+                        <th>Institución</th>
+                        <th>¿Cuenta con código?</th>
+                        <th>Liga</th>
+                        <th>Fecha de publicación</th>
+                        <th></th>
+                    </tr></thead>
+                    <tbody>
+                        ${detalle.map(inst => `
+                            <tr>
+                                <td>${inst.nombre}</td>
+                                <td>${inst.cuenta || '—'}</td>
+                                <td>${inst.link ? '<a href="' + inst.link + '" target="_blank">Ver enlace</a>' : '—'}</td>
+                                <td>${inst.fecha || '—'}</td>
+                            </tr>
+                        `).join('')}
+                    </tbody>
+                </table>
+            </td>
+        `;
+        tbody.appendChild(trDetalle);
     });
 }
-
 async function renderizarMapa(datos) {
 
     const NOMBRE_MAP = {
@@ -213,6 +250,14 @@ async function renderizarMapa(datos) {
     };
 
     Plotly.react("mapa", [trace], layout, { responsive: true, displayModeBar: false });
+}
+
+function toggleDetalle(idEstado) {
+    const fila    = document.getElementById(`detalle_${idEstado}`);
+    const btn     = fila.previousElementSibling.querySelector('.btn-expandir');
+    const visible = fila.style.display !== "none";
+    fila.style.display = visible ? "none" : "table-row";
+    btn.textContent    = visible ? "▶" : "▼";
 }
 
 async function actualizarDashboard(datos) {
