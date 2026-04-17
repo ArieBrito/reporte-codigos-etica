@@ -480,11 +480,13 @@ def guardar_validacion_codigos():
 @app.route("/enviar-validacion", methods=["POST"])
 @login_required
 def enviar_validacion():
+    import hashlib
+    from reportlab.platypus import Table, TableStyle, HRFlowable
+
     estado = session["estado"]
     db     = get_supabase_autenticado()
 
     # ── F2-04: verificar cobertura completa ────────────────────
-    # Traer todos los entes confirmados del estado.
     resp_entes = db.table("entes_confirmados") \
         .select("nombre").eq("estado", estado).eq("confirmado", True).execute()
 
@@ -493,20 +495,17 @@ def enviar_validacion():
 
     nombres_entes = {r["nombre"] for r in resp_entes.data}
 
-    # Solo cuentan los registros donde el usuario explícitamente respondió
-    # "Sí" — los demás (No / No se recibió información) no son "validados".
     resp_codigos = db.table("codigos_etica") \
         .select("nombre, cuenta_codigo") \
         .eq("estado", estado).execute()
 
-    codigos_data       = resp_codigos.data or []
-    nombres_revisados  = {r["nombre"] for r in codigos_data}
+    codigos_data         = resp_codigos.data or []
+    nombres_revisados    = {r["nombre"] for r in codigos_data}
     instituciones_con_si = [
         r["nombre"] for r in codigos_data
         if (r.get("cuenta_codigo") or "").strip() == "Sí"
     ]
 
-    # Bloquear envío si algún ente confirmado no tiene registro en codigos_etica.
     sin_revisar = nombres_entes - nombres_revisados
     if sin_revisar:
         return jsonify({
@@ -518,9 +517,6 @@ def enviar_validacion():
     total_con_si        = len(instituciones_con_si)
 
     # ── F2-05 paso 1: descargar imagen de fondo (con fallback local) ──
-    # La imagen se obtiene de Supabase Storage; si falla por cualquier
-    # razón (bucket ausente, red, etc.) se usa el archivo local como
-    # respaldo para que el PDF sí pueda generarse.
     RUTA_FONDO_LOCAL = os.path.join(app.root_path, "static", "assets", FONDO_STORAGE)
     fondo_bytes = None
 
@@ -533,56 +529,185 @@ def enviar_validacion():
         if os.path.exists(RUTA_FONDO_LOCAL):
             with open(RUTA_FONDO_LOCAL, "rb") as f:
                 fondo_bytes = io.BytesIO(f.read())
-        # Si tampoco existe el fallback local, fondo_bytes queda None
-        # y el PDF se genera sin imagen de fondo (mejor que fallar).
 
     # ── F2-05 paso 2: construir PDF con ReportLab ──────────────
     nombre_pdf = f"acuse_codigos_etica_{normalizar_texto(estado)}.pdf"
     buffer     = io.BytesIO()
 
+    # Folio único: primeros 8 caracteres del SHA-256 de estado + timestamp
+    folio_raw = f"{estado}{datetime.now().isoformat()}"
+    folio     = hashlib.sha256(folio_raw.encode()).hexdigest()[:8].upper()
+
     doc = SimpleDocTemplate(
         buffer, pagesize=LETTER,
         rightMargin=72, leftMargin=72,
-        topMargin=120, bottomMargin=72
+        topMargin=135,
+        bottomMargin=85
     )
 
-    styles        = getSampleStyleSheet()
-    estilo_titulo = ParagraphStyle(
-        "Titulo",
-        parent=styles["Heading1"],
-        fontSize=26,
-        textColor=colors.HexColor("#A11C3A"),
-        alignment=1,
-        spaceAfter=30
+    styles = getSampleStyleSheet()
+    VINO  = colors.HexColor("#A11C3A")
+    GRIS  = colors.HexColor("#555555")
+    CLARO = colors.HexColor("#F5F0F1")
+
+    # ── Estilos ────────────────────────────────────────────────
+    estilo_folio = ParagraphStyle(
+        "Folio",
+        parent=styles["Normal"],
+        fontSize=7,
+        textColor=GRIS,
+        alignment=2,  # derecha
+    )
+    estilo_seccion = ParagraphStyle(
+        "Seccion",
+        parent=styles["Normal"],
+        fontSize=10,
+        textColor=VINO,
+        fontName="Helvetica-Bold",
+        spaceBefore=4,
+        spaceAfter=6,
+    )
+    estilo_label = ParagraphStyle(
+        "Label",
+        parent=styles["Normal"],
+        fontSize=9,
+        textColor=VINO,
+        fontName="Helvetica-Bold",
+    )
+    estilo_valor = ParagraphStyle(
+        "Valor",
+        parent=styles["Normal"],
+        fontSize=9,
+        textColor=colors.HexColor("#1A1A1A"),
+    )
+    estilo_inst = ParagraphStyle(
+        "Inst",
+        parent=styles["Normal"],
+        fontSize=8,
+        textColor=colors.HexColor("#1A1A1A"),
+        leading=12,
+    )
+    estilo_link = ParagraphStyle(
+        "Link",
+        parent=styles["Normal"],
+        fontSize=7,
+        textColor=colors.HexColor("#1155CC"),
+        leading=10,
+    )
+    estilo_cierre = ParagraphStyle(
+        "Cierre",
+        parent=styles["Normal"],
+        fontSize=8,
+        textColor=GRIS,
+        fontName="Helvetica-Oblique",
+        alignment=1,  # centrado
     )
 
-    elements = [
-        Paragraph("ACUSE", estilo_titulo),
-        Paragraph(f"<b>Estado:</b> {estado}",                                   styles["Normal"]),
-        Paragraph(f"<b>Fecha:</b> {datetime.now().strftime('%d/%m/%Y %H:%M')}",  styles["Normal"]),
-        Spacer(1, 0.3 * inch),
-        Paragraph(f"<b>Instituciones confirmadas:</b> {total_instituciones}",    styles["Normal"]),
-        Paragraph(f"<b>Instituciones con Código de Ética (Sí):</b> {total_con_si}", styles["Normal"]),
-        Spacer(1, 0.4 * inch),
-        Paragraph("<b>Instituciones con Código de Ética publicado:</b>",         styles["Heading3"]),
-        Spacer(1, 0.2 * inch),
+    # ── Helpers ────────────────────────────────────────────────
+    def linea():
+        return HRFlowable(
+            width="100%", thickness=0.5,
+            color=VINO, spaceAfter=8, spaceBefore=8
+        )
+
+    def tabla_datos(filas):
+        """Tabla etiqueta | valor con filas alternas."""
+        data = [
+            [Paragraph(e, estilo_label), Paragraph(v, estilo_valor)]
+            for e, v in filas
+        ]
+        t = Table(data, colWidths=[170, 300])
+        t.setStyle(TableStyle([
+            ("VALIGN",        (0, 0), (-1, -1), "TOP"),
+            ("TOPPADDING",    (0, 0), (-1, -1), 5),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
+            ("LEFTPADDING",   (0, 0), (-1, -1), 6),
+            ("RIGHTPADDING",  (0, 0), (-1, -1), 4),
+            *[("BACKGROUND",  (0, i), (-1, i), CLARO)
+              for i in range(0, len(data), 2)],
+        ]))
+        return t
+
+    def tabla_instituciones(lista):
+        """Tabla numerada: # | nombre | link."""
+        data = []
+        for idx, inst in enumerate(lista):
+            nombre_p = Paragraph(inst["nombre"], estilo_inst)
+            link_txt = inst.get("link") or ""
+            link_p   = Paragraph(
+                f'<link href="{link_txt}">{link_txt}</link>'
+                if link_txt else "— sin enlace registrado",
+                estilo_link
+            )
+            data.append([Paragraph(f"{idx + 1}.", estilo_inst), nombre_p, link_p])
+
+        t = Table(data, colWidths=[15, 195, 258])
+        t.setStyle(TableStyle([
+            ("VALIGN",        (0, 0), (-1, -1), "TOP"),
+            ("TOPPADDING",    (0, 0), (-1, -1), 5),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
+            ("LEFTPADDING",   (0, 0), (-1, -1), 2),
+            ("RIGHTPADDING",  (0, 0), (-1, -1), 4),
+            *[("BACKGROUND",  (0, i), (-1, i), CLARO)
+              for i in range(0, len(data), 2)],
+        ]))
+        return t
+
+    # ── Obtener links de instituciones con "Sí" ────────────────
+    resp_links = db.table("codigos_etica") \
+        .select("nombre, link") \
+        .eq("estado", estado) \
+        .eq("cuenta_codigo", "Sí") \
+        .execute()
+
+    mapa_links = {r["nombre"]: r.get("link", "") for r in (resp_links.data or [])}
+    instituciones_detalle = [
+        {"nombre": n, "link": mapa_links.get(n, "")}
+        for n in sorted(instituciones_con_si)
     ]
 
-    if instituciones_con_si:
-        elements.append(ListFlowable(
-            [ListItem(Paragraph(n, styles["Normal"])) for n in sorted(instituciones_con_si)],
-            bulletType="bullet"
-        ))
+    # ── Armado del documento ───────────────────────────────────
+    elements = [
+        Paragraph(f"Folio: <b>{folio}</b>", estilo_folio),
+        Spacer(1, 0.15 * inch),
+        linea(),
+
+        Paragraph("DATOS GENERALES", estilo_seccion),
+        tabla_datos([
+            ("Estado:",         estado),
+            ("Fecha de envío:", datetime.now().strftime("%d/%m/%Y  %H:%M hrs")),
+            ("Folio:",          folio),
+        ]),
+        linea(),
+
+        Paragraph("RESUMEN DE VALIDACIÓN", estilo_seccion),
+        tabla_datos([
+            ("Instituciones confirmadas:",               str(total_instituciones)),
+            ("Instituciones con Código de Ética (Sí):", str(total_con_si)),
+            ("Instituciones sin Código de Ética:",
+             str(total_instituciones - total_con_si)),
+        ]),
+        linea(),
+
+        Paragraph("INSTITUCIONES CON CÓDIGO DE ÉTICA PUBLICADO", estilo_seccion),
+        Spacer(1, 0.05 * inch),
+    ]
+
+    if instituciones_detalle:
+        elements.append(tabla_instituciones(instituciones_detalle))
     else:
-        elements.append(Paragraph("Ninguna institución reportó contar con código.", styles["Normal"]))
+        elements.append(Paragraph(
+            "Ninguna institución reportó contar con Código de Ética publicado.",
+            estilo_inst
+        ))
 
     elements += [
-        Spacer(1, 0.5 * inch),
-        Paragraph("El proceso queda formalmente cerrado.", styles["Normal"])
+        linea(),
+        Spacer(1, 0.2 * inch),
+        Paragraph("El proceso de validación queda formalmente cerrado.", estilo_cierre),
     ]
 
     def dibujar_fondo(canvas, doc):
-        """Dibuja la imagen de fondo si está disponible; si no, omite sin error."""
         if not fondo_bytes:
             return
         fondo_bytes.seek(0)
@@ -596,8 +721,6 @@ def enviar_validacion():
     doc.build(elements, onFirstPage=dibujar_fondo, onLaterPages=dibujar_fondo)
 
     # ── F2-05 paso 3: subir PDF a Supabase Storage ─────────────
-    # Si la subida falla, el proceso NO se marca como cerrado
-    # y se devuelve error para que el usuario pueda reintentar.
     try:
         supabase_admin.storage.from_(STORAGE_BUCKET).upload(
             path=nombre_pdf,
