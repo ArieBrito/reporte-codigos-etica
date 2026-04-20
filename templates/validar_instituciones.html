@@ -18,6 +18,9 @@
     <button type="button" data-poder="Autonomo" onclick="filtrar('Autonomo')">Organismos Autónomos</button>
     <button type="button" data-poder="Municipio" onclick="filtrar('Municipio')">Municipios</button>
     <button type="button" data-poder="TODOS" onclick="filtrar('TODOS')">Mostrar todos</button>
+    <button type="button" id="btn-orden" onclick="toggleOrden()" style="margin-left:8px;">
+        A→Z
+    </button>
     <input
         type="text"
         id="buscador"
@@ -83,6 +86,17 @@ let poderActivo = 'TODOS';
 let hayCambiosPendientes = false;
 let paginaActual = 1;
 let porPagina = 10;
+let ordenAlfabetico = false;
+
+/* =======================
+   ORDEN ALFABÉTICO
+======================= */
+function toggleOrden() {
+    ordenAlfabetico = !ordenAlfabetico;
+    document.getElementById('btn-orden').textContent = ordenAlfabetico ? 'Z→A' : 'A→Z';
+    paginaActual = 1;
+    renderPagina();
+}
 
 /* =======================
    CARGA INICIAL (bootstrap)
@@ -254,14 +268,22 @@ function renderPagina() {
         .normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().trim();
 
     const todas     = Array.from(document.querySelectorAll('.form-group'));
-    const coinciden = todas.filter(div => {
-        const coincidePoder    = poderActivo === 'TODOS' || div.dataset.poder === poderActivo;
-        const nombreNorm       = (div.dataset.nombre || '').normalize('NFD')
-                                  .replace(/[̀-ͯ]/g, '').toLowerCase();
-        const coincideBusqueda = !query || nombreNorm.includes(query);
-        return coincidePoder && coincideBusqueda;
-    });
+    let coinciden = todas.filter(div => {
+            const coincidePoder    = poderActivo === 'TODOS' || div.dataset.poder === poderActivo;
+            const nombreNorm       = (div.dataset.nombre || '').normalize('NFD')
+                                    .replace(/[̀-ͯ]/g, '').toLowerCase();
+            const coincideBusqueda = !query || nombreNorm.includes(query);
+            return coincidePoder && coincideBusqueda;
+        });
 
+        if (ordenAlfabetico !== false) {
+            coinciden = [...coinciden].sort((a, b) => {
+                const na = (a.dataset.nombre || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
+                const nb = (b.dataset.nombre || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
+                return ordenAlfabetico ? na.localeCompare(nb) : nb.localeCompare(na);
+            });
+        }
+        
     const total       = coinciden.length;
     const totalPags   = porPagina >= 9999 ? 1 : Math.max(1, Math.ceil(total / porPagina));
     if (paginaActual > totalPags) paginaActual = totalPags;
