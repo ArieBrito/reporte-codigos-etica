@@ -378,7 +378,6 @@ def descarga_instituciones():
         headers={"Content-Disposition": f"attachment; filename={filename}"}
     )
 
-
 @app.route("/descarga/codigos")
 @login_required
 def descarga_codigos():
@@ -437,9 +436,6 @@ def descarga_codigos():
         headers={"Content-Disposition": f"attachment; filename={filename}"}
     )
 
-# /instituciones-base fue eliminado: su lógica vive en /bootstrap-instituciones.
-
-
 @app.route("/guardar-validacion", methods=["POST"])
 @login_required
 def guardar_validacion():
@@ -478,7 +474,6 @@ def guardar_validacion():
     invalidar_cache()
     return jsonify({"status": "ok"})
 
-
 @app.route("/hay-entes-confirmados")
 @login_required
 def hay_entes_confirmados():
@@ -491,7 +486,6 @@ def hay_entes_confirmados():
         .limit(1).execute()
 
     return jsonify({"hay": bool(resp.data)})
-
 
 @app.route("/entes-confirmados-nombres")
 @login_required
@@ -531,16 +525,6 @@ def validar_codigos():
         usuario=session.get("usuario"),
         estado=session.get("estado")
     )
-
-
-# /datos-codigos fue eliminado: su lógica vive en /bootstrap-codigos.
-
-
-# /estatus-codigos fue eliminado: su lógica vive en /bootstrap-codigos.
-
-
-# /instituciones-confirmadas fue eliminado: su lógica vive en /bootstrap-codigos.
-
 
 @app.route("/guardar-validacion-codigos", methods=["POST"])
 @login_required
@@ -589,10 +573,23 @@ def guardar_validacion_codigos():
 @login_required
 def enviar_validacion():
     import hashlib
-    from reportlab.platypus import Table, TableStyle, HRFlowable
+    import locale
+    from reportlab.platypus import Table, TableStyle, HRFlowable, PageBreak, KeepTogether
+    from reportlab.lib.enums import TA_CENTER
 
     estado = session["estado"]
     db     = get_supabase_autenticado()
+
+    # ── Fecha en español ───────────────────────────────────────
+    try:
+        locale.setlocale(locale.LC_TIME, "es_MX.UTF-8")
+    except locale.Error:
+        try:
+            locale.setlocale(locale.LC_TIME, "es_ES.UTF-8")
+        except locale.Error:
+            pass
+
+    fecha_larga = f"{datetime.now().day} de {datetime.now().strftime('%B')} de {datetime.now().year}"
 
     # ── F2-04: verificar cobertura completa ────────────────────
     resp_entes = db.table("entes_confirmados") \
@@ -603,16 +600,19 @@ def enviar_validacion():
 
     nombres_entes = {r["nombre"] for r in resp_entes.data}
 
-    resp_codigos = db.table("codigos_etica") \
-        .select("nombre, cuenta_codigo") \
-        .eq("estado", estado).execute()
+    # ── Obtener datos completos de todos los códigos verificados ──
+    resp_codigos_detalle = db.table("codigos_etica") \
+        .select("nombre, cuenta_codigo, link, num_instituciones") \
+        .eq("estado", estado) \
+        .order("nombre") \
+        .execute()
 
-    codigos_data         = resp_codigos.data or []
-    nombres_revisados    = {r["nombre"] for r in codigos_data}
-    instituciones_con_si = [
-        r["nombre"] for r in codigos_data
+    codigos_detalle   = resp_codigos_detalle.data or []
+    nombres_revisados = {r["nombre"] for r in codigos_detalle}
+    total_con_si      = sum(
+        1 for r in codigos_detalle
         if (r.get("cuenta_codigo") or "").strip() == "Sí"
-    ]
+    )
 
     sin_revisar = nombres_entes - nombres_revisados
     if sin_revisar:
@@ -622,7 +622,6 @@ def enviar_validacion():
         }), 400
 
     total_instituciones = len(nombres_entes)
-    total_con_si        = len(instituciones_con_si)
 
     # ── F2-05 paso 1: descargar imagen de fondo (con fallback local) ──
     RUTA_FONDO_LOCAL = os.path.join(app.root_path, "static", "assets", FONDO_STORAGE)
@@ -642,15 +641,20 @@ def enviar_validacion():
     nombre_pdf = f"acuse_codigos_etica_{normalizar_texto(estado)}.pdf"
     buffer     = io.BytesIO()
 
-    # Folio único: primeros 8 caracteres del SHA-256 de estado + timestamp
     folio_raw = f"{estado}{datetime.now().isoformat()}"
     folio     = hashlib.sha256(folio_raw.encode()).hexdigest()[:8].upper()
 
+    PAGE_W, PAGE_H = LETTER
+    TOP_MARGIN    = 135
+    BOTTOM_MARGIN = 85
+    SIDE_MARGIN   = 72
+    AREA_H        = PAGE_H - TOP_MARGIN - BOTTOM_MARGIN
+
     doc = SimpleDocTemplate(
         buffer, pagesize=LETTER,
-        rightMargin=72, leftMargin=72,
-        topMargin=135,
-        bottomMargin=85
+        rightMargin=SIDE_MARGIN, leftMargin=SIDE_MARGIN,
+        topMargin=TOP_MARGIN,
+        bottomMargin=BOTTOM_MARGIN
     )
 
     styles = getSampleStyleSheet()
@@ -664,7 +668,17 @@ def enviar_validacion():
         parent=styles["Normal"],
         fontSize=7,
         textColor=GRIS,
-        alignment=2,  # derecha
+        alignment=2,
+    )
+    estilo_intro = ParagraphStyle(
+        "Intro",
+        parent=styles["Normal"],
+        fontSize=10,
+        textColor=colors.HexColor("#1A1A1A"),
+        leading=15,
+        spaceBefore=4,
+        spaceAfter=4,
+        alignment=4,
     )
     estilo_seccion = ParagraphStyle(
         "Seccion",
@@ -688,6 +702,22 @@ def enviar_validacion():
         fontSize=9,
         textColor=colors.HexColor("#1A1A1A"),
     )
+    estilo_header = ParagraphStyle(
+        "Header",
+        parent=styles["Normal"],
+        fontSize=8,
+        textColor=colors.white,
+        fontName="Helvetica-Bold",
+        leading=12,
+    )
+    estilo_fecha = ParagraphStyle(
+        "Fecha",
+        parent=styles["Normal"],
+        fontSize=10,
+        textColor=GRIS,
+        leading=15,
+        alignment=2,  # derecha
+    )
     estilo_inst = ParagraphStyle(
         "Inst",
         parent=styles["Normal"],
@@ -708,7 +738,16 @@ def enviar_validacion():
         fontSize=8,
         textColor=GRIS,
         fontName="Helvetica-Oblique",
-        alignment=1,  # centrado
+        alignment=1,
+    )
+    estilo_firma = ParagraphStyle(
+        "Firma",
+        parent=styles["Normal"],
+        fontSize=9,
+        textColor=VINO,
+        fontName="Helvetica-Bold",
+        alignment=1,
+        spaceBefore=6,
     )
 
     # ── Helpers ────────────────────────────────────────────────
@@ -719,7 +758,6 @@ def enviar_validacion():
         )
 
     def tabla_datos(filas):
-        """Tabla etiqueta | valor con filas alternas."""
         data = [
             [Paragraph(e, estilo_label), Paragraph(v, estilo_valor)]
             for e, v in filas
@@ -736,76 +774,104 @@ def enviar_validacion():
         ]))
         return t
 
-    def tabla_instituciones(lista):
-        """Tabla numerada: # | nombre | link."""
-        data = []
-        for idx, inst in enumerate(lista):
-            nombre_p = Paragraph(inst["nombre"], estilo_inst)
+    def tabla_codigos(lista):
+        encabezados = [
+            Paragraph("Institución", estilo_header),
+            Paragraph("¿Cuenta con código?", estilo_header),
+            Paragraph("Enlace", estilo_header),
+            Paragraph("Núm. instituciones", estilo_header),
+        ]
+        data = [encabezados]
+        for inst in lista:
             link_txt = inst.get("link") or ""
-            link_p   = Paragraph(
-                f'<link href="{link_txt}">{link_txt}</link>'
-                if link_txt else "— sin enlace registrado",
-                estilo_link
-            )
-            data.append([Paragraph(f"{idx + 1}.", estilo_inst), nombre_p, link_p])
-
-        t = Table(data, colWidths=[15, 195, 258])
+            num      = inst.get("num_instituciones")
+            num_str  = str(num) if num not in (None, "") else "—"
+            data.append([
+                Paragraph(inst.get("nombre", ""), estilo_inst),
+                Paragraph(inst.get("cuenta_codigo") or "—", estilo_inst),
+                Paragraph(
+                    f'<link href="{link_txt}">{link_txt}</link>'
+                    if link_txt else "— sin enlace",
+                    estilo_link
+                ),
+                Paragraph(num_str, estilo_inst),
+            ])
+        t = Table(data, colWidths=[155, 75, 178, 60])
         t.setStyle(TableStyle([
+            ("BACKGROUND",    (0, 0), (-1, 0), VINO),
             ("VALIGN",        (0, 0), (-1, -1), "TOP"),
             ("TOPPADDING",    (0, 0), (-1, -1), 5),
             ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
-            ("LEFTPADDING",   (0, 0), (-1, -1), 2),
+            ("LEFTPADDING",   (0, 0), (-1, -1), 6),
             ("RIGHTPADDING",  (0, 0), (-1, -1), 4),
             *[("BACKGROUND",  (0, i), (-1, i), CLARO)
-              for i in range(0, len(data), 2)],
+              for i in range(1, len(data), 2)],
         ]))
         return t
 
-    # ── Obtener links de instituciones con "Sí" ────────────────
-    resp_links = db.table("codigos_etica") \
-        .select("nombre, link") \
-        .eq("estado", estado) \
-        .eq("cuenta_codigo", "Sí") \
-        .execute()
-
-    mapa_links = {r["nombre"]: r.get("link", "") for r in (resp_links.data or [])}
-    instituciones_detalle = [
-        {"nombre": n, "link": mapa_links.get(n, "")}
-        for n in sorted(instituciones_con_si)
-    ]
-
-    # ── Armado del documento ───────────────────────────────────
-    elements = [
+    # ── Bloque de primera página ───────────────────────────────
+    bloque_p1 = [
+        Paragraph(f"Ciudad de México a {fecha_larga}", estilo_fecha),
+        Spacer(1, 0.05 * inch),
         Paragraph(f"Folio: <b>{folio}</b>", estilo_folio),
         Spacer(1, 0.15 * inch),
+        Paragraph(
+            f"Se emite el presente acuse a la Secretaría Ejecutiva del Sistema Estatal "
+            f"Anticorrupción de <b>{estado}</b>, en virtud de haber concluido la integración "
+            f"de la información relativa al seguimiento de la emisión de Códigos de Ética, "
+            f"el día <b>{datetime.now().strftime('%d/%m/%Y')}</b> "
+            f"a las <b>{datetime.now().strftime('%H:%M hrs')}</b>.",
+            estilo_intro
+        ),
+        Spacer(1, 0.08 * inch),
+        Paragraph(
+            "La Secretaría Ejecutiva del Sistema Nacional Anticorrupción agradece el compromiso "
+            "y la valiosa participación de esta institución en favor del fortalecimiento de la "
+            "coordinación entre instancias y del cumplimiento de los acuerdos del Sistema "
+            "Nacional Anticorrupción.",
+            estilo_intro
+        ),
+        Spacer(1, 0.15 * inch),
         linea(),
-
-        Paragraph("DATOS GENERALES", estilo_seccion),
-        tabla_datos([
-            ("Estado:",         estado),
-            ("Fecha de envío:", datetime.now().strftime("%d/%m/%Y  %H:%M hrs")),
-            ("Folio:",          folio),
-        ]),
-        linea(),
-
         Paragraph("RESUMEN DE VALIDACIÓN", estilo_seccion),
         tabla_datos([
             ("Instituciones confirmadas:",               str(total_instituciones)),
             ("Instituciones con Código de Ética (Sí):", str(total_con_si)),
-            ("Instituciones sin Código de Ética:",
-             str(total_instituciones - total_con_si)),
+            ("Instituciones sin Código de Ética:",       str(total_instituciones - total_con_si)),
         ]),
         linea(),
+        Spacer(1, 0.6 * inch),
+        Paragraph(
+            "Secretaría Ejecutiva del Sistema Nacional Anticorrupción",
+            estilo_firma
+        ),
+    ]
 
-        Paragraph("INSTITUCIONES CON CÓDIGO DE ÉTICA PUBLICADO", estilo_seccion),
+    # ── Calcular padding para centrado vertical en p.1 ────────
+    from reportlab.pdfgen.canvas import Canvas as RLCanvas
+    tmp = io.BytesIO()
+    tmp_canvas = RLCanvas(tmp, pagesize=LETTER)
+    text_w = PAGE_W - 2 * SIDE_MARGIN
+    total_h = 0
+    for flowable in bloque_p1:
+        w, h = flowable.wrap(text_w, AREA_H)
+        total_h += h
+    del tmp_canvas
+
+    padding_top = max(0, (AREA_H - total_h) / 4)
+
+    # ── Armado final del documento ─────────────────────────────
+    elements = [Spacer(1, padding_top)] + bloque_p1 + [
+        PageBreak(),
+        Paragraph("CÓDIGOS DE ÉTICA VERIFICADOS", estilo_seccion),
         Spacer(1, 0.05 * inch),
     ]
 
-    if instituciones_detalle:
-        elements.append(tabla_instituciones(instituciones_detalle))
+    if codigos_detalle:
+        elements.append(tabla_codigos(codigos_detalle))
     else:
         elements.append(Paragraph(
-            "Ninguna institución reportó contar con Código de Ética publicado.",
+            "No se registraron códigos de ética en este proceso.",
             estilo_inst
         ))
 
