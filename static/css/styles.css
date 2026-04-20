@@ -522,7 +522,7 @@ h4 {
 
 .codigos-body .card p    { font-size: 16px; line-height: 1.4; margin-bottom: 10px; }
 .codigos-body .card h3   { margin-bottom: 15px; font-size: 14px; }
-.codigos-body #contenedor { max-width: 900px; }
+.codigos-body #contenedor { max-width: none; }
 .codigos-body label      { margin-right: 12px; font-size: 14px; }
 
 /* =====================================================
