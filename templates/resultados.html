@@ -267,6 +267,70 @@ async function actualizarDashboard(datos) {
     await renderizarMapa(datos);
 }
 
+function descargarCSV() {
+    // Obtener datos del DOM ya renderizado
+    const filas = [];
+
+    // Encabezados completos
+    filas.push([
+        "Entidad",
+        "Instituciones emisoras",
+        "Códigos con liga registrada",
+        "Instituciones destinatarias",
+        "Institución",
+        "¿Cuenta con código?",
+        "Liga",
+        "Fecha de publicación"
+    ].map(h => `"${h}"`).join(","));
+
+    const tabla = document.getElementById("tablaEstados");
+    const filasPrincipales = tabla.querySelectorAll("tr.fila-estado");
+
+    filasPrincipales.forEach(trEstado => {
+        const celdas      = trEstado.querySelectorAll("td");
+        const entidad     = celdas[1]?.innerText.trim() || "";
+        const emisoras    = celdas[2]?.innerText.trim() || "";
+        const conLink     = celdas[3]?.innerText.trim() || "";
+        const destinat    = celdas[4]?.innerText.trim() || "";
+
+        // Buscar la fila de detalle correspondiente
+        const idEstado    = entidad.replace(/\s+/g, "_");
+        const trDetalle   = document.getElementById(`detalle_${idEstado}`);
+        const instRows    = trDetalle
+            ? trDetalle.querySelectorAll("table.tabla-detalle tbody tr")
+            : [];
+
+        if (instRows.length === 0) {
+            // Entidad sin detalle cargado aún
+            filas.push([entidad, emisoras, conLink, destinat, "", "", "", ""]
+                .map(v => `"${v.replace(/"/g, '""')}"`).join(","));
+        } else {
+            // Una fila por institución, repitiendo datos de la entidad
+            instRows.forEach(trInst => {
+                const cols = trInst.querySelectorAll("td");
+                const nombre  = cols[0]?.innerText.trim() || "";
+                const cuenta  = cols[1]?.innerText.trim() || "";
+                const ligaEl = cols[2]?.querySelector("a");
+                const liga   = ligaEl ? ligaEl.getAttribute("href") : (cols[2]?.innerText.trim() === "—" ? "" : cols[2]?.innerText.trim());
+                const fecha   = cols[3]?.innerText.trim() || "";
+
+                filas.push([entidad, emisoras, conLink, destinat, nombre, cuenta, liga, fecha]
+                    .map(v => `"${v.replace(/"/g, '""')}"`).join(","));
+            });
+        }
+    });
+
+    const blob = new Blob(["\uFEFF" + filas.join("\n")], {
+        type: "text/csv;charset=utf-8;"
+    });
+    const url  = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href     = url;
+    link.download = "codigos_etica.csv";
+    link.click();
+    URL.revokeObjectURL(url);
+}
+
 // ======================================================
 // CARGA INICIAL
 // ======================================================
