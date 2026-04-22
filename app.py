@@ -301,13 +301,14 @@ def api_resultados():
     ]
 
     resultado = {
-        "total_codigos": sum(r["total_codigos"] for r in resumen),
+        # FIX: total visible = suma de los que SÍ tienen código, no todas las filas
+        "total_codigos": sum(r["codigos_con_si"] for r in resumen),
         "años":          [a["anio"]  for a in anios],
         "valores":       [a["total"] for a in anios],
         "mapa":          {r["estado"]: r["codigos_con_link"] for r in resumen},
         "estados":       estados
     }
-
+    
     _cache_resultados["data"] = resultado
     _cache_resultados["ts"]   = ahora
 
