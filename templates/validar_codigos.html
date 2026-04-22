@@ -301,6 +301,7 @@ function guardarTodo() {
     if (!cards.length) { alert('No hay información que guardar'); return; }
 
     const payload = [];
+    const errores = [];
 
     cards.forEach(card => {
         const nombreOriginal = card.dataset.nombre;
@@ -310,6 +311,19 @@ function guardarTodo() {
         const link   = card.querySelector(`#link_${idUnico}`).value.trim();
         const fecha  = card.querySelector(`#fecha_${idUnico}`).value;
         const num    = card.querySelector(`#num_${idUnico}`).value;
+
+    if (cuenta === 'Sí') {
+        const camposFaltantes = [];
+        if (!link)                       camposFaltantes.push('Enlace');
+        if (!fecha)                      camposFaltantes.push('Fecha de publicación');
+        if (!cumple)                     camposFaltantes.push('¿Cumple lineamientos?');
+        if (!num || parseInt(num) === 0) camposFaltantes.push('Número de instituciones destinatarias');
+
+        if (camposFaltantes.length) {
+            errores.push(`• ${nombreOriginal}:\n    ${camposFaltantes.join(', ')}`);
+        }
+    }
+
         payload.push({
             nombre: nombreOriginal,
             cuenta_codigo: cuenta,
@@ -319,6 +333,11 @@ function guardarTodo() {
             num_instituciones: parseInt(num) || 0  // FIX 3: enviar número, no string
         });
     });
+
+    if (errores.length) {
+        alert('Corrige los siguientes campos obligatorios antes de guardar:\n\n' + errores.join('\n'));
+        return;
+    }
 
     Loader.show("Guardando información");
     fetch('/guardar-validacion-codigos', {
