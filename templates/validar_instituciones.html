@@ -232,11 +232,8 @@ function crearFila(fila, formulario, esNueva = false) {
 }
 
 
-
-
 /* =======================
    FILTRADO
-   Actualiza la pestaña activa y delega a renderPagina.
 ======================= */
 function filtrar(poder) {
     poderActivo = poder;
@@ -251,7 +248,7 @@ function filtrar(poder) {
 }
 
 /* =======================
-   BÚSQUEDA (llamada desde oninput del buscador)
+   BÚSQUEDA
 ======================= */
 function aplicarFiltros() {
     paginaActual = 1;
@@ -260,8 +257,6 @@ function aplicarFiltros() {
 
 /* =======================
    PAGINACIÓN
-   Única función que decide qué cards son visibles.
-   Combina filtro de poder + texto de búsqueda.
 ======================= */
 function renderPagina() {
     const query = ((document.getElementById('buscador') || {}).value || '')
@@ -294,7 +289,6 @@ function renderPagina() {
 
     todas.forEach(div => { div.style.display = enPagina.has(div) ? 'block' : 'none'; });
 
-    // Controles de paginación
     const paginacion = document.getElementById('paginacion');
     paginacion.style.display = 'flex';
 
@@ -308,7 +302,6 @@ function renderPagina() {
             ? 'Sin resultados'
             : `${desde}–${hasta} de ${total} institución${total !== 1 ? 'es' : ''}`;
 
-    // Contador del buscador
     const contador = document.getElementById('buscador-contador');
     if (contador) {
         if (query) {
@@ -348,7 +341,6 @@ function agregarEntrada() {
     crearFila(fila, document.getElementById('formulario-dinamico'), true);
     hayCambiosPendientes = true;
 
-    // Ir a la última página del filtro activo, donde quedó la nueva fila
     const coinciden = Array.from(document.querySelectorAll('.form-group'))
         .filter(div => div.dataset.poder === poderActivo);
     const totalPags = porPagina >= 9999 ? 1 : Math.max(1, Math.ceil(coinciden.length / porPagina));
@@ -356,7 +348,6 @@ function agregarEntrada() {
 
     renderPagina();
 
-    // Enfocar el input para que el usuario escriba de inmediato
     const nuevaFila = document.querySelector(`.form-group[data-id="${nuevoId}"]`);
     if (nuevaFila) {
         nuevaFila.querySelector('input').focus();
@@ -366,20 +357,32 @@ function agregarEntrada() {
 
 /* =======================
    GUARDAR
+   FIX: se envían TODOS los registros confirmados del formulario,
+   no solo los visibles en la página actual. El backend hace
+   DELETE + INSERT para que renombres y desconfirmaciones
+   se reflejen correctamente.
 ======================= */
 function guardarValidacion() {
 
     const confirmados = [];
 
+    // Recorrer TODAS las filas del formulario (no solo las visibles)
     document.querySelectorAll('.form-group').forEach(div => {
+        // FIX: solo enviar los confirmados; los no confirmados
+        // se omiten intencionalmente para que el backend los elimine.
         if (div.dataset.confirmado !== "true") return;
 
         const fila = filasOriginales[div.dataset.id];
         if (!fila) return;
 
+        const nombreActual = div.querySelector('input').value.trim();
+
+        // FIX: ignorar entradas con nombre vacío
+        if (!nombreActual) return;
+
         confirmados.push({
             id:            fila.id,
-            nombre:        div.querySelector('input').value,
+            nombre:        nombreActual,
             poderGobierno: fila.poderGobierno,
         });
     });
@@ -396,7 +399,11 @@ function guardarValidacion() {
         body: JSON.stringify({ filas: confirmados })
     })
     .then(r => r.json())
-    .then(() => {
+    .then(resp => {
+        if (resp.error) {
+            alert('Error: ' + resp.error);
+            return;
+        }
         hayCambiosPendientes = false;
         alert('Información guardada correctamente');
     })

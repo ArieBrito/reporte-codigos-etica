@@ -436,27 +436,36 @@ def descarga_codigos():
         headers={"Content-Disposition": f"attachment; filename={filename}"}
     )
 
+# ==============================================================
+# REEMPLAZA el endpoint /guardar-validacion en app.py
+# ==============================================================
+ 
 @app.route("/guardar-validacion", methods=["POST"])
 @login_required
 def guardar_validacion():
     """
     Persiste los entes validados por el usuario.
-    Los ids tipo 'nuevo_xxx' se marcan como `es_nueva=True`.
+    Estrategia: DELETE de todos los confirmados del estado
+    + INSERT de los que llegan en el payload.
+    Esto permite renombrar, desconfirmar y sobreescribir
+    sin dejar registros huérfanos.
     """
     estado = session["estado"]
     db     = get_supabase_autenticado()
-
+ 
     if _proceso_cerrado(db, estado):
         return jsonify({"error": "Proceso cerrado"}), 403
-
+ 
     filas     = request.get_json().get("filas", [])
     registros = []
-
+ 
     for fila in filas:
-        raw_id = fila.get("id")
+        raw_id     = fila.get("id")
+        nombre_nuevo = limpiar(fila.get("nombre", ""))
+ 
         reg = {
             "estado":         estado,
-            "nombre":         limpiar(fila.get("nombre", "")),
+            "nombre":         nombre_nuevo,
             "poder_gobierno": limpiar(fila.get("poderGobierno", "")),
             "confirmado":     True,
         }
@@ -464,15 +473,22 @@ def guardar_validacion():
             reg["institucion_id"] = int(raw_id)
             reg["es_nueva"]       = False
         except (ValueError, TypeError):
-            reg["es_nueva"]       = True   # id generado en el frontend
-
+            reg["es_nueva"]       = True
+ 
         registros.append(reg)
-
+ 
+    # ── FIX: borrar todos los confirmados del estado y re-insertar ──
+    # Esto garantiza que renombres y desconfirmaciones se reflejen
+    # correctamente, sin dejar filas huérfanas.
     db.table("entes_confirmados") \
-        .upsert(registros, on_conflict="estado,nombre").execute()
-
+        .delete().eq("estado", estado).execute()
+ 
+    if registros:
+        db.table("entes_confirmados").insert(registros).execute()
+ 
     invalidar_cache()
     return jsonify({"status": "ok"})
+ 
 
 @app.route("/hay-entes-confirmados")
 @login_required
@@ -531,14 +547,15 @@ def validar_codigos():
 def guardar_validacion_codigos():
     """
     Persiste los datos de códigos de ética.
-    Upsert con clave (estado, nombre); campos opcionales se normalizan.
+    Estrategia: DELETE + INSERT para manejar correctamente
+    cualquier cambio de nombre que venga de validar_instituciones.
     """
     estado = session["estado"]
     db     = get_supabase_autenticado()
-
+ 
     if _proceso_cerrado(db, estado):
         return jsonify({"error": "Proceso cerrado"}), 403
-
+ 
     registros = []
     for fila in request.get_json():
         num = fila.get("num_instituciones")
@@ -546,7 +563,7 @@ def guardar_validacion_codigos():
             num = int(num) if num not in (None, "") else 0
         except (ValueError, TypeError):
             num = 0
-
+ 
         registros.append({
             "estado":              estado,
             "nombre":              limpiar(fila.get("nombre")),
@@ -556,13 +573,17 @@ def guardar_validacion_codigos():
             "cumple_lineamientos": limpiar(fila.get("cumple_lineamientos")),
             "num_instituciones":   num,
         })
-
+ 
+    # ── FIX: borrar y re-insertar para evitar nombres huérfanos ──
     db.table("codigos_etica") \
-        .upsert(registros, on_conflict="estado,nombre").execute()
-
+        .delete().eq("estado", estado).execute()
+ 
+    if registros:
+        db.table("codigos_etica").insert(registros).execute()
+ 
     invalidar_cache()
     return jsonify({"status": "ok"})
-
+    
 # ==============================================================
 # ENVÍO FINAL + GENERACIÓN DE PDF
 # Cierra el proceso del estado y genera el acuse en PDF,
@@ -615,11 +636,30 @@ def enviar_validacion():
     )
 
     sin_revisar = nombres_entes - nombres_revisados
+    if not codigos_detalle:
+        return jsonify({"error": "Guarda la información antes de enviar"}), 400
+
+    sin_revisar = nombres_entes - nombres_revisados
     if sin_revisar:
-        return jsonify({
-            "error": "Revisión incompleta",
-            "sin_revisar": sorted(sin_revisar),
-        }), 400
+        # Insertar filas vacías para los entes que faltan, en lugar de bloquear
+        faltantes = [
+            {
+                "estado":              estado,
+                "nombre":              nombre,
+                "cuenta_codigo":       "No se recibió información",
+                "link":                "",
+                "fecha_publicacion":   None,
+                "cumple_lineamientos": "",
+                "num_instituciones":   0,
+            }
+            for nombre in sin_revisar
+        ]
+        db.table("codigos_etica").upsert(faltantes, on_conflict="estado,nombre").execute()
+        # Recargar detalle actualizado
+        resp_codigos_detalle = db.table("codigos_etica") \
+            .select("nombre, cuenta_codigo, link, num_instituciones") \
+            .eq("estado", estado).order("nombre").execute()
+        codigos_detalle = resp_codigos_detalle.data or []
 
     total_instituciones = len(nombres_entes)
 

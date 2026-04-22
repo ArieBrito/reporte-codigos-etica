@@ -117,10 +117,16 @@ function actualizarDependencias(card) {
    CARGA INICIAL
 ========================================= */
 
+// FIX 1: Variable boot accesible en todo el scope del script
+// para que editarCode pueda consultar boot.cerrado
+let bootData = null;
+
 Loader.show("Cargando códigos de ética");
 fetch('/bootstrap-codigos')
 .then(r => r.json())
 .then(boot => {
+
+    bootData = boot; // FIX 1: guardar referencia global
 
     const instituciones = boot.instituciones;
     const datosCodigos  = boot.datos;
@@ -275,8 +281,13 @@ function editarCode(btn) {
 
     const card = btn.parentElement;
 
+    // FIX 1: No permitir edición si el proceso está cerrado
+    if (bootData?.cerrado) return;
+
     card.querySelectorAll('input').forEach(i => i.disabled = false);
 
+    // actualizarDependencias ya estaba aquí pero ahora es efectivo
+    // porque la guarda de bootData garantiza que sólo llega si !cerrado
     actualizarDependencias(card);
 }
 
@@ -299,7 +310,14 @@ function guardarTodo() {
         const link   = card.querySelector(`#link_${idUnico}`).value.trim();
         const fecha  = card.querySelector(`#fecha_${idUnico}`).value;
         const num    = card.querySelector(`#num_${idUnico}`).value;
-        payload.push({ nombre: nombreOriginal, cuenta_codigo: cuenta, link, fecha_publicacion: fecha, cumple_lineamientos: cumple, num_instituciones: num });
+        payload.push({
+            nombre: nombreOriginal,
+            cuenta_codigo: cuenta,
+            link,
+            fecha_publicacion: fecha,
+            cumple_lineamientos: cumple,
+            num_instituciones: parseInt(num) || 0  // FIX 3: enviar número, no string
+        });
     });
 
     Loader.show("Guardando información");
@@ -314,6 +332,7 @@ function guardarTodo() {
         cards.forEach(card => {
             card.querySelectorAll('input').forEach(i => i.disabled = true);
             card.classList.add('codigo-validado');
+            actualizarDependencias(card); // FIX 2: restaurar estado visual de dependencias
         });
     })
     .catch(() => alert('No se pudo guardar la información'))
