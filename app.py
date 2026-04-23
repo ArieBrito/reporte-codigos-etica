@@ -23,6 +23,9 @@ import httpx
 app = Flask(__name__)
 app.secret_key = os.environ.get("FLASK_SECRET_KEY")
 
+from werkzeug.middleware.proxy_fix import ProxyFix
+app.wsgi_app = ProxyFix(app.wsgi_app, x_prefix=1)
+
 # ==============================================================
 # TIMEOUTS
 # CONNECT_TIMEOUT : tiempo máximo para establecer la conexión TCP.
