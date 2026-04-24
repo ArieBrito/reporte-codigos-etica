@@ -16,15 +16,27 @@ from reportlab.lib.units import inch
 from supabase import create_client, Client, ClientOptions
 import httpx
 
+from werkzeug.middleware.proxy_fix import ProxyFix
+from werkzeug.middleware.dispatcher import DispatcherMiddleware
+from werkzeug.exceptions import NotFound
+
 # ==============================================================
 # CONFIGURACIÓN DE LA APP
 # ==============================================================
 
+APPLICATION_ROOT = os.environ.get("APPLICATION_ROOT", "/")
+
 app = Flask(__name__)
 app.secret_key = os.environ.get("FLASK_SECRET_KEY")
+app.config["APPLICATION_ROOT"] = APPLICATION_ROOT
+app.config["PREFERRED_URL_SCHEME"] = "https"
 
-from werkzeug.middleware.proxy_fix import ProxyFix
 app.wsgi_app = ProxyFix(app.wsgi_app, x_prefix=1)
+
+if APPLICATION_ROOT != "/":
+    app.wsgi_app = DispatcherMiddleware(NotFound(), {
+        APPLICATION_ROOT: app.wsgi_app
+    })
 
 # ==============================================================
 # TIMEOUTS
