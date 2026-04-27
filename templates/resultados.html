@@ -185,7 +185,7 @@ async function renderizarMapa(datos) {
         "México": "Estado de México",
     };
 
-    const geojson = await fetch("/static/estados/estados_mexico.json").then(r => r.json());
+    const geojson = await fetch(window.BASE_URL + "/static/estados/estados_mexico.json").then(r => r.json());
 
     const locations = [];
     const values    = [];
@@ -336,7 +336,7 @@ function descargarCSV() {
 // ======================================================
 
 async function cargarDatos() {
-    const resp  = await fetch("/api/resultados");
+    const resp  = await fetch(window.BASE_URL + "/api/resultados");
     const datos = await resp.json();
     await actualizarDashboard(datos);
 }

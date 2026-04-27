@@ -15,13 +15,13 @@
 
 <br>
 
-<button type="button" onclick="window.location.href='/validar-instituciones'">
+<button type="button" onclick="window.location.href= window.BASE_URL + '/validar-instituciones'">
 ← Volver a verificación de Entes Públicos
 </button>
 
 <button onclick="guardarTodo()" class="btn-guardar">Guardar todo</button>
 
-<button type="button" onclick="window.location.href='/descarga/codigos'" class="btn-guardar">
+<button type="button" onclick="window.location.href= window.BASE_URL + '/descarga/codigos'" class="btn-guardar">
     Descargar información
 </button>
 
@@ -122,7 +122,7 @@ function actualizarDependencias(card) {
 let bootData = null;
 
 Loader.show("Cargando códigos de ética");
-fetch('/bootstrap-codigos')
+fetch(window.BASE_URL + '/bootstrap-codigos')
 .then(r => r.json())
 .then(boot => {
 
@@ -340,7 +340,7 @@ function guardarTodo() {
     }
 
     Loader.show("Guardando información");
-    fetch('/guardar-validacion-codigos', {
+    fetch(window.BASE_URL + '/guardar-validacion-codigos', {
         method:  'POST',
         headers: { 'Content-Type': 'application/json' },
         body:    JSON.stringify(payload)
@@ -378,7 +378,7 @@ function confirmarEnvio(){
     cerrarConfirm();
     Loader.show("Generando acuse");
 
-    fetch('/enviar-validacion', { method: 'POST' })
+    fetch(window.BASE_URL + '/enviar-validacion', { method: 'POST' })
     .then(r => r.json())
     .then(resp => {
         Loader.hide()
@@ -404,7 +404,7 @@ function confirmarEnvio(){
         aPdf.href = urlSegura(resp.pdf); aPdf.target = '_blank';
         aPdf.className = 'btn-confirm'; aPdf.textContent = 'Descargar acuse';
         const aHome  = document.createElement('a');
-        aHome.href = '/'; aHome.className = 'btn-cancel'; aHome.textContent = 'Ir al inicio';
+        aHome.href = window.BASE_URL + '/'; aHome.className = 'btn-cancel'; aHome.textContent = 'Ir al inicio';
         acts.appendChild(aPdf); acts.appendChild(aHome);
         box.appendChild(hdr); box.appendChild(bdy); box.appendChild(acts);
         modal.appendChild(box);

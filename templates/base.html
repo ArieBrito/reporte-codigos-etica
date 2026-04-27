@@ -5,6 +5,8 @@
     <meta charset="UTF-8">
     <title>{% block title %}{% endblock %}</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='css/styles.css') }}">
+    <script>window.BASE_URL = "{{ request.script_root }}";</script>
+    
 </head>
 
 <body class="{% block body_class %}{% endblock %}">

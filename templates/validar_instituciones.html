@@ -52,7 +52,7 @@
 
 <br>
 
-<button type="button" onclick="window.location.href='/'">
+<button type="button" onclick="window.location.href= window.BASE_URL + '/'">
     Volver al inicio
     <img src="{{ url_for('static', filename='assets/icons/arrow_back_24dp.svg')}}">
 </button>
@@ -67,7 +67,7 @@
     <img src="{{ url_for('static', filename='assets/icons/save.svg')}}">
 </button>
 
-<button type="button" onclick="window.location.href='/descarga/instituciones'" class="btn-guardar">
+<button type="button" onclick="window.location.href=window.BASE_URL + '/descarga/instituciones'" class="btn-guardar">
     Descargar instituciones
 </button>
 
@@ -102,7 +102,7 @@ function toggleOrden() {
    CARGA INICIAL (bootstrap)
 ======================= */
 Loader.show("Cargando instituciones");
-fetch('/bootstrap-instituciones')
+fetch(window.BASE_URL + '/bootstrap-instituciones')
     .then(r => r.json())
     .then(boot => {
 
@@ -393,7 +393,7 @@ function guardarValidacion() {
     }
 
     Loader.show("Guardando verificación");
-    fetch('/guardar-validacion', {
+    fetch(window.BASE_URL + '/guardar-validacion', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ filas: confirmados })
@@ -421,7 +421,7 @@ function irAValidarCodigos() {
     }
 
     Loader.show("Verificando entes confirmados");
-    fetch('/hay-entes-confirmados')
+    fetch(window.BASE_URL + '/hay-entes-confirmados')
         .then(r => r.json())
         .then(resp => {
             if (!resp.hay) {
@@ -429,7 +429,7 @@ function irAValidarCodigos() {
                 Loader.hide();
                 return;
             }
-            window.location.href = '/validar-codigos';
+            window.location.href = window.BASE_URL + '/validar-codigos';
         })
         .catch(() => Loader.hide());
 }
