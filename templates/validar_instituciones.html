@@ -106,36 +106,29 @@ fetch(window.BASE_URL + '/bootstrap-instituciones')
     .then(r => r.json())
     .then(boot => {
 
-        const data        = boot.instituciones.data;
-        const confirmados = boot.confirmados;
-        const estatus     = boot.estatus;
+        const data       = boot.instituciones.data;
+        const verificados = boot.verificados || [];
+        const estatus    = boot.estatus;
 
         const formulario = document.getElementById('formulario-dinamico');
 
         (data || []).forEach(fila => {
+            // Normalizar campos tanto si vienen del catálogo como de entes_confirmados
             const normalizada = {
                 id:            fila.id,
                 nombre:        fila.nombre || '',
                 poderGobierno: fila.poderGobierno || fila.poder_gobierno || '',
                 confirmado:    fila.confirmado || false,
+                verificado:    fila.verificado || false,
             };
             filasOriginales[normalizada.id] = normalizada;
             crearFila(normalizada, formulario);
         });
 
-        // Restaurar confirmados
-        document.querySelectorAll('.form-group').forEach(div => {
-            if (confirmados.includes(div.dataset.nombre)) {
-                div.dataset.confirmado = "true";
-                div.classList.add('confirmado');
-                div.querySelector('input').readOnly = true;
-            }
-        });
         hayCambiosPendientes = false;
-
         filtrar('TODOS');
 
-        // Aplicar estatus códigos
+        // Aplicar estatus de códigos (badge)
         document.querySelectorAll('.form-group').forEach(div => {
             const normalizado = div.dataset.nombre
                 .normalize("NFD")
@@ -143,7 +136,7 @@ fetch(window.BASE_URL + '/bootstrap-instituciones')
                 .toLowerCase()
                 .replace(/\s+/g, "_");
             const badge = div.querySelector('.badge');
-            if (estatus.includes(normalizado)) {
+            if (badge && estatus.includes(normalizado)) {
                 badge.textContent = "Código Validado";
                 badge.classList.remove("pendiente");
                 badge.classList.add("validado");
@@ -170,15 +163,22 @@ fetch(window.BASE_URL + '/bootstrap-instituciones')
 
 /* =======================
    CREAR FILA
+   Cada tarjeta tiene:
+   - Botón "Editar"    → habilita el input de nombre
+   - Botón "Verificar" → marca el ente como obligado (verificado=true), ilumina verde
+   - Botón "Eliminar"  → ya no borra de BD, solo oculta/marca como no confirmado
 ======================= */
 function crearFila(fila, formulario, esNueva = false) {
 
     const div = document.createElement('div');
     div.className = 'form-group';
-    div.dataset.id     = fila.id;
-    div.dataset.poder  = fila.poderGobierno;
-    div.dataset.nombre = fila.nombre;
-    div.dataset.confirmado = "false";
+    if (fila.verificado) div.classList.add('verificado');
+
+    div.dataset.id         = fila.id;
+    div.dataset.poder      = fila.poderGobierno;
+    div.dataset.nombre     = fila.nombre;
+    div.dataset.confirmado = String(fila.confirmado || false);
+    div.dataset.verificado = String(fila.verificado || false);
 
     const nombreSeguro = fila.nombre.replace(/"/g, '&quot;');
 
@@ -194,14 +194,19 @@ function crearFila(fila, formulario, esNueva = false) {
         <input type="text" value="${nombreSeguro}" ${!esNueva ? 'readonly' : ''}>
         <br>
 
-        <button type="button">Editar</button>
-        <button type="button">Confirmar</button>
-        <button type="button" style="background:#9B2247;color:white;">Eliminar</button>
+        <button type="button" class="btn-editar">Editar</button>
+        <button type="button" class="btn-verificar ${fila.verificado ? 'activo' : ''}">
+            ${fila.verificado ? '✓ Verificado (obligado)' : 'Marcar como obligado'}
+        </button>
+        <button type="button" class="btn-eliminar" style="background:#9B2247;color:white;">Eliminar</button>
     `;
 
-    const [input, btnEditar, btnConfirmar, btnEliminar] =
-        div.querySelectorAll('input, button');
+    const input       = div.querySelector('input');
+    const btnEditar   = div.querySelector('.btn-editar');
+    const btnVerificar = div.querySelector('.btn-verificar');
+    const btnEliminar = div.querySelector('.btn-eliminar');
 
+    // Editar nombre
     input.oninput = () => {
         filasOriginales[fila.id].nombre = input.value;
         div.dataset.nombre = input.value;
@@ -210,21 +215,41 @@ function crearFila(fila, formulario, esNueva = false) {
 
     btnEditar.onclick = () => {
         input.readOnly = false;
-        div.dataset.confirmado = "false";
-        div.classList.remove('confirmado');
+        input.focus();
         hayCambiosPendientes = true;
     };
 
-    btnConfirmar.onclick = () => {
-        input.readOnly = true;
-        div.dataset.confirmado = "true";
-        div.classList.add('confirmado');
+    // Verificar / desverificar (toggle)
+    btnVerificar.onclick = () => {
+        const estaVerificado = div.dataset.verificado === 'true';
+        const nuevoEstado    = !estaVerificado;
+
+        div.dataset.verificado = String(nuevoEstado);
+        filasOriginales[fila.id].verificado = nuevoEstado;
+
+        if (nuevoEstado) {
+            div.classList.add('verificado');
+            btnVerificar.classList.add('activo');
+            btnVerificar.textContent = '✓ Verificado (obligado)';
+        } else {
+            div.classList.remove('verificado');
+            btnVerificar.classList.remove('activo');
+            btnVerificar.textContent = 'Marcar como obligado';
+        }
+
         hayCambiosPendientes = true;
     };
 
+    // Eliminar — solo marca como no confirmado y oculta la tarjeta
+    // No elimina de la BD; el UPSERT preservará el registro sin verificado
     btnEliminar.onclick = () => {
-        delete filasOriginales[fila.id];
-        div.remove();
+        if (!confirm(`¿Eliminar "${input.value}" de la lista?`)) return;
+        filasOriginales[fila.id].eliminado   = true;
+        filasOriginales[fila.id].verificado  = false;
+        filasOriginales[fila.id].confirmado  = false;
+        div.dataset.verificado = 'false';
+        div.dataset.confirmado = 'false';
+        div.style.display = 'none';
         hayCambiosPendientes = true;
     };
 
@@ -262,32 +287,49 @@ function renderPagina() {
     const query = ((document.getElementById('buscador') || {}).value || '')
         .normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().trim();
 
-    const todas     = Array.from(document.querySelectorAll('.form-group'));
-    let coinciden = todas.filter(div => {
-            const coincidePoder    = poderActivo === 'TODOS' || div.dataset.poder === poderActivo;
-            const nombreNorm       = (div.dataset.nombre || '').normalize('NFD')
-                                    .replace(/[̀-ͯ]/g, '').toLowerCase();
-            const coincideBusqueda = !query || nombreNorm.includes(query);
-            return coincidePoder && coincideBusqueda;
+    // Excluir eliminadas
+    const todas = Array.from(document.querySelectorAll('.form-group'))
+        .filter(div => div.style.display !== 'none' || div.dataset.verificado !== 'false');
+
+    const visibles = Array.from(document.querySelectorAll('.form-group'))
+        .filter(div => {
+            const eliminado = filasOriginales[div.dataset.id]?.eliminado;
+            return !eliminado;
         });
 
-        if (ordenAlfabetico !== false) {
-            coinciden = [...coinciden].sort((a, b) => {
-                const na = (a.dataset.nombre || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
-                const nb = (b.dataset.nombre || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
-                return ordenAlfabetico ? na.localeCompare(nb) : nb.localeCompare(na);
-            });
-        }
-        
-    const total       = coinciden.length;
-    const totalPags   = porPagina >= 9999 ? 1 : Math.max(1, Math.ceil(total / porPagina));
+    let coinciden = visibles.filter(div => {
+        const coincidePoder    = poderActivo === 'TODOS' || div.dataset.poder === poderActivo;
+        const nombreNorm       = (div.dataset.nombre || '').normalize('NFD')
+                                .replace(/[̀-ͯ]/g, '').toLowerCase();
+        const coincideBusqueda = !query || nombreNorm.includes(query);
+        return coincidePoder && coincideBusqueda;
+    });
+
+    if (ordenAlfabetico !== false) {
+        coinciden = [...coinciden].sort((a, b) => {
+            const na = (a.dataset.nombre || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
+            const nb = (b.dataset.nombre || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
+            return ordenAlfabetico ? na.localeCompare(nb) : nb.localeCompare(na);
+        });
+    }
+
+    const total     = coinciden.length;
+    const totalPags = porPagina >= 9999 ? 1 : Math.max(1, Math.ceil(total / porPagina));
     if (paginaActual > totalPags) paginaActual = totalPags;
 
     const inicio   = (paginaActual - 1) * porPagina;
     const fin      = porPagina >= 9999 ? total : inicio + porPagina;
     const enPagina = new Set(coinciden.slice(inicio, fin));
 
-    todas.forEach(div => { div.style.display = enPagina.has(div) ? 'block' : 'none'; });
+    // Ocultar todas, luego mostrar solo las de esta página
+    document.querySelectorAll('.form-group').forEach(div => {
+        const eliminado = filasOriginales[div.dataset.id]?.eliminado;
+        if (eliminado) {
+            div.style.display = 'none';
+        } else {
+            div.style.display = enPagina.has(div) ? 'block' : 'none';
+        }
+    });
 
     const paginacion = document.getElementById('paginacion');
     paginacion.style.display = 'flex';
@@ -335,14 +377,20 @@ function agregarEntrada() {
     }
 
     const nuevoId = 'nuevo_' + Date.now();
-    const fila = { id: nuevoId, nombre: '', poderGobierno: poderActivo };
+    const fila = {
+        id: nuevoId,
+        nombre: '',
+        poderGobierno: poderActivo,
+        confirmado: false,
+        verificado: false,
+    };
 
     filasOriginales[nuevoId] = fila;
     crearFila(fila, document.getElementById('formulario-dinamico'), true);
     hayCambiosPendientes = true;
 
     const coinciden = Array.from(document.querySelectorAll('.form-group'))
-        .filter(div => div.dataset.poder === poderActivo);
+        .filter(div => div.dataset.poder === poderActivo && !filasOriginales[div.dataset.id]?.eliminado);
     const totalPags = porPagina >= 9999 ? 1 : Math.max(1, Math.ceil(coinciden.length / porPagina));
     paginaActual = totalPags;
 
@@ -357,38 +405,34 @@ function agregarEntrada() {
 
 /* =======================
    GUARDAR
-   FIX: se envían TODOS los registros confirmados del formulario,
-   no solo los visibles en la página actual. El backend hace
-   DELETE + INSERT para que renombres y desconfirmaciones
-   se reflejen correctamente.
+   Se envían TODOS los registros (no eliminados).
+   El backend hace UPSERT: nunca borra, solo actualiza.
+   El campo `verificado` determina si aparece en códigos de ética.
 ======================= */
 function guardarValidacion() {
 
-    const confirmados = [];
+    const payload = [];
 
-    // Recorrer TODAS las filas del formulario (no solo las visibles)
     document.querySelectorAll('.form-group').forEach(div => {
-        // FIX: solo enviar los confirmados; los no confirmados
-        // se omiten intencionalmente para que el backend los elimine.
-        if (div.dataset.confirmado !== "true") return;
-
         const fila = filasOriginales[div.dataset.id];
         if (!fila) return;
 
+        // Si fue marcado como eliminado, enviarlo con verificado=false y confirmado=false
+        // para que el UPSERT lo desactive pero no lo pierda
         const nombreActual = div.querySelector('input').value.trim();
+        if (!nombreActual) return; // ignorar entradas vacías
 
-        // FIX: ignorar entradas con nombre vacío
-        if (!nombreActual) return;
-
-        confirmados.push({
+        payload.push({
             id:            fila.id,
             nombre:        nombreActual,
             poderGobierno: fila.poderGobierno,
+            confirmado:    !fila.eliminado && (div.dataset.confirmado === 'true' || div.dataset.verificado === 'true'),
+            verificado:    !fila.eliminado && (div.dataset.verificado === 'true'),
         });
     });
 
-    if (!confirmados.length) {
-        alert('No hay registros confirmados');
+    if (!payload.length) {
+        alert('No hay registros para guardar');
         return;
     }
 
@@ -396,7 +440,7 @@ function guardarValidacion() {
     fetch(window.BASE_URL + '/guardar-validacion', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ filas: confirmados })
+        body: JSON.stringify({ filas: payload })
     })
     .then(r => r.json())
     .then(resp => {
@@ -420,12 +464,12 @@ function irAValidarCodigos() {
         return;
     }
 
-    Loader.show("Verificando entes confirmados");
+    Loader.show("Verificando entes obligados");
     fetch(window.BASE_URL + '/hay-entes-confirmados')
         .then(r => r.json())
         .then(resp => {
             if (!resp.hay) {
-                alert('Primero confirma al menos una institución');
+                alert('Primero marca como obligada al menos una institución');
                 Loader.hide();
                 return;
             }
@@ -434,6 +478,30 @@ function irAValidarCodigos() {
         .catch(() => Loader.hide());
 }
 </script>
+
+<style>
+/* ── Tarjeta verificada: fondo verde suave ── */
+.form-group.verificado {
+    border-left: 4px solid #2e7d32;
+    background-color: #f0fdf4;
+}
+
+/* ── Botón verificar activo ── */
+.btn-verificar {
+    background: #e8f5e9;
+    color: #2e7d32;
+    border: 1px solid #a5d6a7;
+    cursor: pointer;
+}
+.btn-verificar.activo {
+    background: #2e7d32;
+    color: white;
+    border-color: #2e7d32;
+}
+.btn-verificar:hover {
+    opacity: 0.85;
+}
+</style>
 
 </div>
 {% endblock %}

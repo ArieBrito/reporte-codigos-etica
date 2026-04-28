@@ -23,30 +23,14 @@ import httpx
 app = Flask(__name__)
 app.secret_key = os.environ.get("FLASK_SECRET_KEY")
 
-# ==============================================================
-# TIMEOUTS
-# CONNECT_TIMEOUT : tiempo máximo para establecer la conexión TCP.
-# READ_TIMEOUT    : tiempo máximo esperando la primera respuesta.
-# Se aplican tanto a requests.get (imagen de fondo del PDF) como
-# a los clientes Supabase (postgrest y storage).
-# ==============================================================
-
-CONNECT_TIMEOUT = 3.05   # segundos — margen sobre el RTT típico de 3 s
-READ_TIMEOUT    = 10.0   # segundos — suficiente para queries normales
+CONNECT_TIMEOUT = 3.05
+READ_TIMEOUT    = 10.0
 
 _HTTPX_TIMEOUT = httpx.Timeout(READ_TIMEOUT, connect=CONNECT_TIMEOUT)
 _SB_OPTIONS    = ClientOptions(
     postgrest_client_timeout = _HTTPX_TIMEOUT,
     storage_client_timeout   = int(READ_TIMEOUT),
 )
-
-# ==============================================================
-# CLIENTES SUPABASE
-# Usamos dos clientes:
-#   · supabase       → cliente anónimo / RLS activo (usuarios)
-#   · supabase_admin → service role, sin RLS (operaciones internas)
-# Ambos comparten los mismos timeouts definidos en _SB_OPTIONS.
-# ==============================================================
 
 SUPABASE_URL         = os.environ.get("SUPABASE_URL")
 SUPABASE_KEY         = os.environ.get("SUPABASE_KEY")
@@ -56,26 +40,14 @@ supabase:       Client = create_client(SUPABASE_URL, SUPABASE_KEY,         optio
 supabase_admin: Client = create_client(SUPABASE_URL, SUPABASE_SERVICE_KEY, options=_SB_OPTIONS)
 
 STORAGE_BUCKET = "acuses"
-FONDO_STORAGE  = "acuse.png"   # imagen de fondo para el PDF
-
-# ==============================================================
-# CACHÉ EN MEMORIA PARA EL DASHBOARD
-# Evita reconsultar Supabase en cada petición al endpoint
-# /api/resultados; se invalida al guardar cualquier cambio.
-# ==============================================================
+FONDO_STORAGE  = "acuse.png"
 
 _cache_resultados: dict = {"data": None, "ts": 0.0}
-CACHE_TTL = 30  # segundos
+CACHE_TTL = 30
 
 def invalidar_cache():
     _cache_resultados["data"] = None
     _cache_resultados["ts"]   = 0.0
-
-# ==============================================================
-# CONSTANTES DE AUTENTICACIÓN
-# Los usuarios se guardan en Supabase Auth con el patrón
-# <usuario>@sesna.internal para no exponer un email real.
-# ==============================================================
 
 EMAIL_DOMAIN = "sesna.internal"
 
@@ -87,13 +59,11 @@ def usuario_a_email(usuario: str) -> str:
 # ==============================================================
 
 def limpiar(txt):
-    """Elimina espacios, retornos de carro y caracteres problemáticos."""
     if txt is None:
         return ""
     return txt.strip().replace("\r", "").replace('"', '').replace('\ufeff', '')
 
 def normalizar_texto(txt):
-    """Convierte texto a snake_case ASCII, útil como clave de indexación."""
     if not txt:
         return ""
     txt = limpiar(txt)
@@ -104,22 +74,13 @@ def normalizar_texto(txt):
 _CAMPOS_SESION = ("usuario", "estado", "access_token", "refresh_token")
 
 def _sesion_valida() -> bool:
-    """Devuelve True solo si los cuatro campos de sesión están presentes."""
     return all(session.get(c) for c in _CAMPOS_SESION)
 
 def _limpiar_sesion_y_redirigir():
-    """Limpia la sesión parcial y redirige al login."""
     session.clear()
     return redirect(url_for("login"))
 
 def get_supabase_autenticado():
-    """
-    Devuelve un cliente Supabase con la sesión del usuario activo.
-    Refresca el token automáticamente si está próximo a vencer,
-    lo que permite sesiones de larga duración sin re-login.
-    Lanza RuntimeError si la sesión está incompleta (no debería ocurrir
-    porque login_required ya la valida antes de llegar aquí).
-    """
     if not _sesion_valida():
         raise RuntimeError("Sesión incompleta — acceso no autorizado")
 
@@ -138,12 +99,6 @@ def get_supabase_autenticado():
 
     return cliente
 
-# ==============================================================
-# DECORADOR DE AUTENTICACIÓN
-# Exige los cuatro campos de sesión. Si alguno falta (sesión
-# parcial o caducada) limpia la cookie y redirige a /login.
-# ==============================================================
-
 def login_required(f):
     @wraps(f)
     def wrapper(*args, **kwargs):
@@ -153,7 +108,7 @@ def login_required(f):
     return wrapper
 
 # ==============================================================
-# AUTENTICACIÓN: LOGIN / LOGOUT
+# AUTENTICACIÓN
 # ==============================================================
 
 @app.route("/login", methods=["GET", "POST"])
@@ -171,7 +126,6 @@ def login():
                 "password": password
             })
 
-            # El estado del usuario se almacena en sus metadatos de Supabase Auth
             estado = (resp.user.user_metadata or {}).get("estado", "").strip()
             if not estado:
                 return render_template(
@@ -179,9 +133,6 @@ def login():
                     error="Este usuario no tiene un estado asignado. Contacta al administrador."
                 )
 
-            # F2-08: verificar que el valor de estado exista en el catálogo
-            # para detectar errores de aprovisionamiento antes de que rompan
-            # consultas posteriores con pantallas vacías o 500.
             existe = supabase.table("instituciones") \
                 .select("id") \
                 .eq("entidad_nombre", estado) \
@@ -233,7 +184,6 @@ def home():
 
 @app.route("/resultados")
 def resultados():
-    """Vista pública del dashboard de resultados (no requiere login)."""
     return render_template(
         "resultados.html",
         usuario=session.get("usuario"),
@@ -253,8 +203,6 @@ def menu():
 
 # ==============================================================
 # API PÚBLICA: DASHBOARD DE RESULTADOS
-# Devuelve totales, series de años y detalle por estado.
-# Los datos se cachean en memoria por CACHE_TTL segundos.
 # ==============================================================
 
 @app.route("/api/resultados")
@@ -266,16 +214,13 @@ def api_resultados():
 
     db = create_client(SUPABASE_URL, SUPABASE_KEY, options=_SB_OPTIONS)
 
-    # Las vistas SQL hacen el trabajo pesado de agregación
     resumen = db.table("vista_resultados").select("*").execute().data or []
     anios   = db.table("vista_anios").select("*").execute().data or []
 
-    # El detalle es granular, se trae en crudo y se indexa en Python
     detalle = db.table("codigos_etica") \
         .select("estado, nombre, cuenta_codigo, link, fecha_publicacion") \
         .execute().data or []
 
-    # Indexar detalle por estado para O(1) en el armado final
     detalle_map = {}
     for d in detalle:
         detalle_map.setdefault(d["estado"], []).append({
@@ -301,14 +246,13 @@ def api_resultados():
     ]
 
     resultado = {
-        # FIX: total visible = suma de los que SÍ tienen código, no todas las filas
         "total_codigos": sum(r["codigos_con_si"] for r in resumen),
         "años":          [a["anio"]  for a in anios],
         "valores":       [a["total"] for a in anios],
         "mapa":          {r["estado"]: r["codigos_con_link"] for r in resumen},
         "estados":       estados
     }
-    
+
     _cache_resultados["data"] = resultado
     _cache_resultados["ts"]   = ahora
 
@@ -316,8 +260,6 @@ def api_resultados():
 
 # ==============================================================
 # VALIDACIÓN DE INSTITUCIONES (ENTES)
-# Flujo: el usuario revisa/edita el catálogo base de su estado
-# y guarda los entes confirmados en `entes_confirmados`.
 # ==============================================================
 
 @app.route("/validar-instituciones")
@@ -330,18 +272,16 @@ def validar_instituciones():
     )
 
 @app.route("/descarga/instituciones")
-@login_required  
+@login_required
 def descarga_instituciones():
     estado = session["estado"]
     db = get_supabase_autenticado()
 
-    # Intentar datos guardados primero
     resp = db.table("entes_confirmados") \
-        .select("nombre, poder_gobierno, confirmado") \
+        .select("nombre, poder_gobierno, confirmado, verificado") \
         .eq("estado", estado) \
         .execute()
 
-    # Si no hay guardados, usar catálogo base
     if not resp.data:
         resp_base = db.table("instituciones") \
             .select("nombre, poder_gobierno") \
@@ -351,7 +291,8 @@ def descarga_instituciones():
             {
                 "nombre":         r.get("nombre", ""),
                 "poder_gobierno": r.get("poder_gobierno", ""),
-                "confirmado":     None  # aún no verificado
+                "confirmado":     None,
+                "verificado":     False,
             }
             for r in (resp_base.data or [])
         ]
@@ -362,14 +303,16 @@ def descarga_instituciones():
 
     def generar():
         yield "\uFEFF"
-        encabezado = ["Nombre", "Poder de Gobierno", "Confirmado"]
+        encabezado = ["Nombre", "Poder de Gobierno", "Confirmado", "Verificado"]
         yield ",".join(f'"{c}"' for c in encabezado) + "\n"
         for r in filas_data:
             confirmado = r.get("confirmado")
+            verificado = r.get("verificado")
             fila = [
                 r.get("nombre", ""),
                 r.get("poder_gobierno", ""),
-                "Sí" if confirmado is True else ("No" if confirmado is False else "Sin verificar")
+                "Sí" if confirmado is True else ("No" if confirmado is False else "Sin verificar"),
+                "Sí" if verificado is True else "No",
             ]
             yield ",".join(f'"{str(c).replace(chr(34), chr(34)*2)}"' for c in fila) + "\n"
 
@@ -385,18 +328,17 @@ def descarga_codigos():
     estado = session["estado"]
     db = get_supabase_autenticado()
 
-    # Intentar datos guardados primero
     resp = db.table("codigos_etica") \
         .select("nombre, cuenta_codigo, link, fecha_publicacion, cumple_lineamientos, num_instituciones") \
         .eq("estado", estado) \
         .execute()
 
-    # Si no hay guardados, usar instituciones confirmadas como base
     if not resp.data:
+        # Solo entes verificados como base
         resp_base = db.table("entes_confirmados") \
             .select("nombre") \
             .eq("estado", estado) \
-            .eq("confirmado", True) \
+            .eq("verificado", True) \
             .execute()
         filas_data = [
             {
@@ -437,69 +379,69 @@ def descarga_codigos():
         headers={"Content-Disposition": f"attachment; filename={filename}"}
     )
 
+
 # ==============================================================
-# REEMPLAZA el endpoint /guardar-validacion en app.py
+# GUARDAR VALIDACIÓN DE ENTES
+# Estrategia: UPSERT por (estado, nombre) para preservar todos
+# los registros. Ya no se elimina nada. El campo `verificado`
+# indica si el ente está obligado a emitir código de ética.
 # ==============================================================
- 
+
 @app.route("/guardar-validacion", methods=["POST"])
 @login_required
 def guardar_validacion():
-    """
-    Persiste los entes validados por el usuario.
-    Estrategia: DELETE de todos los confirmados del estado
-    + INSERT de los que llegan en el payload.
-    Esto permite renombrar, desconfirmar y sobreescribir
-    sin dejar registros huérfanos.
-    """
     estado = session["estado"]
     db     = get_supabase_autenticado()
- 
+
     if _proceso_cerrado(db, estado):
         return jsonify({"error": "Proceso cerrado"}), 403
- 
+
     filas     = request.get_json().get("filas", [])
     registros = []
- 
+
     for fila in filas:
-        raw_id     = fila.get("id")
+        raw_id       = fila.get("id")
         nombre_nuevo = limpiar(fila.get("nombre", ""))
- 
+
+        if not nombre_nuevo:
+            continue
+
         reg = {
             "estado":         estado,
             "nombre":         nombre_nuevo,
             "poder_gobierno": limpiar(fila.get("poderGobierno", "")),
-            "confirmado":     True,
+            "confirmado":     fila.get("confirmado", False),
+            # `verificado` refleja si el ente está obligado a emitir código
+            "verificado":     fila.get("verificado", False),
         }
         try:
             reg["institucion_id"] = int(raw_id)
             reg["es_nueva"]       = False
         except (ValueError, TypeError):
             reg["es_nueva"]       = True
- 
+
         registros.append(reg)
- 
-    # ── FIX: borrar todos los confirmados del estado y re-insertar ──
-    # Esto garantiza que renombres y desconfirmaciones se reflejen
-    # correctamente, sin dejar filas huérfanas.
-    db.table("entes_confirmados") \
-        .delete().eq("estado", estado).execute()
- 
+
     if registros:
-        db.table("entes_confirmados").insert(registros).execute()
- 
+        # UPSERT: actualiza si ya existe (estado + nombre), inserta si es nuevo.
+        # Nunca elimina registros existentes.
+        db.table("entes_confirmados") \
+            .upsert(registros, on_conflict="estado,nombre") \
+            .execute()
+
     invalidar_cache()
     return jsonify({"status": "ok"})
- 
+
 
 @app.route("/hay-entes-confirmados")
 @login_required
 def hay_entes_confirmados():
-    """Indica si el estado ya tiene al menos un ente confirmado."""
+    """Indica si el estado ya tiene al menos un ente verificado."""
     estado = session["estado"]
     db     = get_supabase_autenticado()
 
     resp = db.table("entes_confirmados") \
-        .select("id").eq("estado", estado).eq("confirmado", True) \
+        .select("id").eq("estado", estado).eq("verificado", True) \
         .limit(1).execute()
 
     return jsonify({"hay": bool(resp.data)})
@@ -507,31 +449,28 @@ def hay_entes_confirmados():
 @app.route("/entes-confirmados-nombres")
 @login_required
 def entes_confirmados_nombres():
-    """Lista de nombres de entes confirmados para el estado activo."""
+    """Lista de nombres de entes verificados para el estado activo."""
     estado = session["estado"]
     db     = get_supabase_autenticado()
 
     resp = db.table("entes_confirmados") \
-        .select("nombre").eq("estado", estado).eq("confirmado", True).execute()
+        .select("nombre").eq("estado", estado).eq("verificado", True).execute()
 
     return jsonify([r["nombre"] for r in (resp.data or [])])
 
 # ==============================================================
 # VALIDACIÓN DE CÓDIGOS DE ÉTICA
-# Flujo: el usuario llena los datos de cada código de ética
-# por institución y los guarda en `codigos_etica`.
-# Requiere que ya existan entes confirmados.
 # ==============================================================
 
 @app.route("/validar-codigos")
 @login_required
 def validar_codigos():
-    """Redirige a entes si el estado aún no tiene instituciones confirmadas."""
+    """Redirige a entes si el estado aún no tiene entes verificados."""
     estado = session["estado"]
     db     = get_supabase_autenticado()
 
     resp = db.table("entes_confirmados") \
-        .select("id").eq("estado", estado).eq("confirmado", True) \
+        .select("id").eq("estado", estado).eq("verificado", True) \
         .limit(1).execute()
 
     if not resp.data:
@@ -583,11 +522,9 @@ def guardar_validacion_codigos():
         import traceback
         print(traceback.format_exc())
         return jsonify({"error": str(e)}), 500
-    
+
 # ==============================================================
 # ENVÍO FINAL + GENERACIÓN DE PDF
-# Cierra el proceso del estado y genera el acuse en PDF,
-# que se sube a Supabase Storage y se devuelve como URL pública.
 # ==============================================================
 
 @app.route("/enviar-validacion", methods=["POST"])
@@ -601,7 +538,6 @@ def enviar_validacion():
     estado = session["estado"]
     db     = get_supabase_autenticado()
 
-    # ── Fecha en español ───────────────────────────────────────
     try:
         locale.setlocale(locale.LC_TIME, "es_MX.UTF-8")
     except locale.Error:
@@ -612,16 +548,15 @@ def enviar_validacion():
 
     fecha_larga = datetime.now().strftime("%d/%m/%Y")
 
-    # ── F2-04: verificar cobertura completa ────────────────────
+    # Solo entes verificados participan en el reporte
     resp_entes = db.table("entes_confirmados") \
-        .select("nombre").eq("estado", estado).eq("confirmado", True).execute()
+        .select("nombre").eq("estado", estado).eq("verificado", True).execute()
 
     if not resp_entes.data:
-        return jsonify({"error": "No hay entes validados"}), 400
+        return jsonify({"error": "No hay entes verificados"}), 400
 
     nombres_entes = {r["nombre"] for r in resp_entes.data}
 
-    # ── Obtener datos completos de todos los códigos verificados ──
     resp_codigos_detalle = db.table("codigos_etica") \
         .select("nombre, cuenta_codigo, link, num_instituciones") \
         .eq("estado", estado) \
@@ -635,13 +570,11 @@ def enviar_validacion():
         if (r.get("cuenta_codigo") or "").strip() == "Sí"
     )
 
-    sin_revisar = nombres_entes - nombres_revisados
     if not codigos_detalle:
         return jsonify({"error": "Guarda la información antes de enviar"}), 400
 
     sin_revisar = nombres_entes - nombres_revisados
     if sin_revisar:
-        # Insertar filas vacías para los entes que faltan, en lugar de bloquear
         faltantes = [
             {
                 "estado":              estado,
@@ -655,7 +588,6 @@ def enviar_validacion():
             for nombre in sin_revisar
         ]
         db.table("codigos_etica").upsert(faltantes, on_conflict="estado,nombre").execute()
-        # Recargar detalle actualizado
         resp_codigos_detalle = db.table("codigos_etica") \
             .select("nombre, cuenta_codigo, link, num_instituciones") \
             .eq("estado", estado).order("nombre").execute()
@@ -663,7 +595,6 @@ def enviar_validacion():
 
     total_instituciones = len(nombres_entes)
 
-    # ── F2-05 paso 1: descargar imagen de fondo (con fallback local) ──
     RUTA_FONDO_LOCAL = os.path.join(app.root_path, "static", "assets", FONDO_STORAGE)
     fondo_bytes = None
 
@@ -677,7 +608,6 @@ def enviar_validacion():
             with open(RUTA_FONDO_LOCAL, "rb") as f:
                 fondo_bytes = io.BytesIO(f.read())
 
-    # ── F2-05 paso 2: construir PDF con ReportLab ──────────────
     nombre_pdf = f"acuse_codigos_etica_{normalizar_texto(estado)}.pdf"
     buffer     = io.BytesIO()
 
@@ -702,106 +632,25 @@ def enviar_validacion():
     GRIS  = colors.HexColor("#555555")
     CLARO = colors.HexColor("#F5F0F1")
 
-    # ── Estilos ────────────────────────────────────────────────
-    estilo_folio = ParagraphStyle(
-        "Folio",
-        parent=styles["Normal"],
-        fontSize=7,
-        textColor=GRIS,
-        alignment=2,
-    )
-    estilo_intro = ParagraphStyle(
-        "Intro",
-        parent=styles["Normal"],
-        fontSize=10,
-        textColor=colors.HexColor("#1A1A1A"),
-        leading=15,
-        spaceBefore=4,
-        spaceAfter=4,
-        alignment=4,
-    )
-    estilo_seccion = ParagraphStyle(
-        "Seccion",
-        parent=styles["Normal"],
-        fontSize=10,
-        textColor=VINO,
-        fontName="Helvetica-Bold",
-        spaceBefore=4,
-        spaceAfter=6,
-    )
-    estilo_label = ParagraphStyle(
-        "Label",
-        parent=styles["Normal"],
-        fontSize=9,
-        textColor=VINO,
-        fontName="Helvetica-Bold",
-    )
-    estilo_valor = ParagraphStyle(
-        "Valor",
-        parent=styles["Normal"],
-        fontSize=9,
-        textColor=colors.HexColor("#1A1A1A"),
-    )
-    estilo_header = ParagraphStyle(
-        "Header",
-        parent=styles["Normal"],
-        fontSize=8,
-        textColor=colors.white,
-        fontName="Helvetica-Bold",
-        leading=12,
-    )
-    estilo_fecha = ParagraphStyle(
-        "Fecha",
-        parent=styles["Normal"],
-        fontSize=10,
-        textColor=GRIS,
-        leading=15,
-        alignment=2,  # derecha
-    )
-    estilo_inst = ParagraphStyle(
-        "Inst",
-        parent=styles["Normal"],
-        fontSize=8,
-        textColor=colors.HexColor("#1A1A1A"),
-        leading=12,
-    )
-    estilo_link = ParagraphStyle(
-        "Link",
-        parent=styles["Normal"],
-        fontSize=7,
-        textColor=colors.HexColor("#1155CC"),
-        leading=10,
-    )
-    estilo_cierre = ParagraphStyle(
-        "Cierre",
-        parent=styles["Normal"],
-        fontSize=8,
-        textColor=GRIS,
-        fontName="Helvetica-Oblique",
-        alignment=1,
-    )
-    estilo_firma = ParagraphStyle(
-        "Firma",
-        parent=styles["Normal"],
-        fontSize=9,
-        textColor=VINO,
-        fontName="Helvetica-Bold",
-        alignment=1,
-        spaceBefore=6,
-    )
+    estilo_folio = ParagraphStyle("Folio", parent=styles["Normal"], fontSize=7, textColor=GRIS, alignment=2)
+    estilo_intro = ParagraphStyle("Intro", parent=styles["Normal"], fontSize=10, textColor=colors.HexColor("#1A1A1A"), leading=15, spaceBefore=4, spaceAfter=4, alignment=4)
+    estilo_seccion = ParagraphStyle("Seccion", parent=styles["Normal"], fontSize=10, textColor=VINO, fontName="Helvetica-Bold", spaceBefore=4, spaceAfter=6)
+    estilo_label = ParagraphStyle("Label", parent=styles["Normal"], fontSize=9, textColor=VINO, fontName="Helvetica-Bold")
+    estilo_valor = ParagraphStyle("Valor", parent=styles["Normal"], fontSize=9, textColor=colors.HexColor("#1A1A1A"))
+    estilo_header = ParagraphStyle("Header", parent=styles["Normal"], fontSize=8, textColor=colors.white, fontName="Helvetica-Bold", leading=12)
+    estilo_fecha = ParagraphStyle("Fecha", parent=styles["Normal"], fontSize=10, textColor=GRIS, leading=15, alignment=2)
+    estilo_inst = ParagraphStyle("Inst", parent=styles["Normal"], fontSize=8, textColor=colors.HexColor("#1A1A1A"), leading=12)
+    estilo_link = ParagraphStyle("Link", parent=styles["Normal"], fontSize=7, textColor=colors.HexColor("#1155CC"), leading=10)
+    estilo_cierre = ParagraphStyle("Cierre", parent=styles["Normal"], fontSize=8, textColor=GRIS, fontName="Helvetica-Oblique", alignment=1)
+    estilo_firma = ParagraphStyle("Firma", parent=styles["Normal"], fontSize=9, textColor=VINO, fontName="Helvetica-Bold", alignment=1, spaceBefore=6)
 
-    # ── Helpers ────────────────────────────────────────────────
     def linea():
-        return HRFlowable(
-            width="100%", thickness=0.5,
-            color=VINO, spaceAfter=8, spaceBefore=8
-        )
+        from reportlab.platypus import HRFlowable
+        return HRFlowable(width="100%", thickness=0.5, color=VINO, spaceAfter=8, spaceBefore=8)
 
     def tabla_datos(filas):
-        data = [
-            [Paragraph(e, estilo_label), Paragraph(v, estilo_valor)]
-            for e, v in filas
-        ]
+        from reportlab.platypus import Table, TableStyle
+        data = [[Paragraph(e, estilo_label), Paragraph(v, estilo_valor)] for e, v in filas]
         t = Table(data, colWidths=[170, 300])
         t.setStyle(TableStyle([
             ("VALIGN",        (0, 0), (-1, -1), "TOP"),
@@ -809,12 +658,12 @@ def enviar_validacion():
             ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
             ("LEFTPADDING",   (0, 0), (-1, -1), 6),
             ("RIGHTPADDING",  (0, 0), (-1, -1), 4),
-            *[("BACKGROUND",  (0, i), (-1, i), CLARO)
-              for i in range(0, len(data), 2)],
+            *[("BACKGROUND",  (0, i), (-1, i), CLARO) for i in range(0, len(data), 2)],
         ]))
         return t
 
     def tabla_codigos(lista):
+        from reportlab.platypus import Table, TableStyle
         encabezados = [
             Paragraph("Institución", estilo_header),
             Paragraph("¿Cuenta con código?", estilo_header),
@@ -829,11 +678,7 @@ def enviar_validacion():
             data.append([
                 Paragraph(inst.get("nombre", ""), estilo_inst),
                 Paragraph(inst.get("cuenta_codigo") or "—", estilo_inst),
-                Paragraph(
-                    f'<link href="{link_txt}">{link_txt}</link>'
-                    if link_txt else "— sin enlace",
-                    estilo_link
-                ),
+                Paragraph(f'<link href="{link_txt}">{link_txt}</link>' if link_txt else "— sin enlace", estilo_link),
                 Paragraph(num_str, estilo_inst),
             ])
         t = Table(data, colWidths=[155, 75, 178, 60])
@@ -844,12 +689,10 @@ def enviar_validacion():
             ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
             ("LEFTPADDING",   (0, 0), (-1, -1), 6),
             ("RIGHTPADDING",  (0, 0), (-1, -1), 4),
-            *[("BACKGROUND",  (0, i), (-1, i), CLARO)
-              for i in range(1, len(data), 2)],
+            *[("BACKGROUND",  (0, i), (-1, i), CLARO) for i in range(1, len(data), 2)],
         ]))
         return t
 
-    # ── Bloque de primera página ───────────────────────────────
     bloque_p1 = [
         Paragraph(f"Ciudad de México a {fecha_larga}", estilo_fecha),
         Spacer(1, 0.05 * inch),
@@ -874,19 +717,15 @@ def enviar_validacion():
         linea(),
         Paragraph("RESUMEN DE VALIDACIÓN", estilo_seccion),
         tabla_datos([
-            ("Instituciones confirmadas:",               str(total_instituciones)),
+            ("Instituciones verificadas:",               str(total_instituciones)),
             ("Instituciones con Código de Ética (Sí):", str(total_con_si)),
             ("Instituciones sin Código de Ética:",       str(total_instituciones - total_con_si)),
         ]),
         linea(),
         Spacer(1, 0.6 * inch),
-        Paragraph(
-            "Secretaría Ejecutiva del Sistema Nacional Anticorrupción",
-            estilo_firma
-        ),
+        Paragraph("Secretaría Ejecutiva del Sistema Nacional Anticorrupción", estilo_firma),
     ]
 
-    # ── Calcular padding para centrado vertical en p.1 ────────
     from reportlab.pdfgen.canvas import Canvas as RLCanvas
     tmp = io.BytesIO()
     tmp_canvas = RLCanvas(tmp, pagesize=LETTER)
@@ -899,7 +738,7 @@ def enviar_validacion():
 
     padding_top = max(0, (AREA_H - total_h) / 4)
 
-    # ── Armado final del documento ─────────────────────────────
+    from reportlab.platypus import PageBreak
     elements = [Spacer(1, padding_top)] + bloque_p1 + [
         PageBreak(),
         Paragraph("CÓDIGOS DE ÉTICA VERIFICADOS", estilo_seccion),
@@ -909,10 +748,7 @@ def enviar_validacion():
     if codigos_detalle:
         elements.append(tabla_codigos(codigos_detalle))
     else:
-        elements.append(Paragraph(
-            "No se registraron códigos de ética en este proceso.",
-            estilo_inst
-        ))
+        elements.append(Paragraph("No se registraron códigos de ética en este proceso.", estilo_inst))
 
     elements += [
         linea(),
@@ -925,15 +761,10 @@ def enviar_validacion():
             return
         fondo_bytes.seek(0)
         w, h = LETTER
-        canvas.drawImage(
-            ImageReader(fondo_bytes), 0, 0,
-            width=w, height=h,
-            preserveAspectRatio=True, mask="auto"
-        )
+        canvas.drawImage(ImageReader(fondo_bytes), 0, 0, width=w, height=h, preserveAspectRatio=True, mask="auto")
 
     doc.build(elements, onFirstPage=dibujar_fondo, onLaterPages=dibujar_fondo)
 
-    # ── F2-05 paso 3: subir PDF a Supabase Storage ─────────────
     try:
         supabase_admin.storage.from_(STORAGE_BUCKET).upload(
             path=nombre_pdf,
@@ -944,7 +775,6 @@ def enviar_validacion():
     except Exception as e:
         return jsonify({"error": f"No se pudo subir el acuse: {e}"}), 502
 
-    # ── F2-05 paso 4: cerrar proceso SOLO si el PDF está disponible ──
     db.table("estados_proceso").upsert({
         "estado":     estado,
         "cerrado":    True,
@@ -956,9 +786,6 @@ def enviar_validacion():
 
 # ==============================================================
 # ENDPOINTS BOOTSTRAP
-# Reducen el número de peticiones al cargar cada vista:
-# devuelven en una sola llamada todos los datos que la página
-# necesita para inicializarse.
 # ==============================================================
 
 @app.route("/bootstrap-instituciones")
@@ -966,8 +793,8 @@ def enviar_validacion():
 def bootstrap_instituciones():
     """
     Payload inicial para la vista de validación de entes.
-    Incluye: instituciones (guardadas u originales), nombres
-    confirmados, estatus de códigos y si el proceso está cerrado.
+    Copia el catálogo base a entes_confirmados si aún no existe
+    para el estado. Incluye el campo `verificado` en cada ente.
     """
     estado = session["estado"]
     db     = get_supabase_autenticado()
@@ -978,22 +805,37 @@ def bootstrap_instituciones():
     if guardados:
         instituciones = {"fuente": "guardado", "data": guardados}
     else:
+        # Primera vez: copiar catálogo base a entes_confirmados
         base = db.table("instituciones") \
             .select("*").eq("entidad_nombre", estado).execute().data or []
+
+        registros_iniciales = [
+            {
+                "estado":         estado,
+                "nombre":         r["nombre"],
+                "poder_gobierno": r["poder_gobierno"],
+                "confirmado":     False,
+                "verificado":     False,
+                "institucion_id": r["id"],
+                "es_nueva":       False,
+            }
+            for r in base
+        ]
+
+        if registros_iniciales:
+            db.table("entes_confirmados").insert(registros_iniciales).execute()
+            guardados = db.table("entes_confirmados") \
+                .select("*").eq("estado", estado).execute().data or []
+        else:
+            guardados = []
+
         instituciones = {
             "fuente": "original",
-            "data": [
-                {
-                    "id":             r["id"],
-                    "nombre":         r["nombre"],
-                    "poderGobierno":  r["poder_gobierno"],
-                    "entidad.nombre": r["entidad_nombre"],
-                }
-                for r in base
-            ]
+            "data": guardados,
         }
 
-    confirmados = [r["nombre"] for r in (guardados or []) if r.get("confirmado")]
+    # Nombres de verificados (para la vista de códigos)
+    verificados = [r["nombre"] for r in (guardados or []) if r.get("verificado")]
 
     resp_codigos = db.table("codigos_etica") \
         .select("nombre").eq("estado", estado).execute()
@@ -1001,7 +843,7 @@ def bootstrap_instituciones():
 
     return jsonify({
         "instituciones": instituciones,
-        "confirmados":   confirmados,
+        "verificados":   verificados,
         "estatus":       estatus,
         "cerrado":       _proceso_cerrado(db, estado),
     })
@@ -1012,15 +854,15 @@ def bootstrap_instituciones():
 def bootstrap_codigos():
     """
     Payload inicial para la vista de validación de códigos.
-    Incluye: instituciones confirmadas, datos de códigos
-    guardados, estatus y si el proceso está cerrado.
+    Solo incluye entes con verificado = true.
     """
     estado = session["estado"]
     db     = get_supabase_autenticado()
 
+    # Solo entes verificados como obligados a emitir código
     resp_entes = db.table("entes_confirmados") \
         .select("nombre, poder_gobierno") \
-        .eq("estado", estado).eq("confirmado", True).execute()
+        .eq("estado", estado).eq("verificado", True).execute()
     instituciones = [
         {"nombre": r["nombre"], "poderGobierno": r.get("poder_gobierno")}
         for r in (resp_entes.data or [])
@@ -1047,12 +889,6 @@ def bootstrap_codigos():
 @app.route("/proceso-cerrado")
 @login_required
 def proceso_cerrado_endpoint():
-    """
-    Consulta puntual sobre si el proceso del estado activo esta cerrado.
-    Reutilizable desde cualquier vista (validar_instituciones, validar_codigos).
-    Los bootstraps ya incluyen este dato; este endpoint sirve para re-verificar
-    el estado en tiempo real sin recargar todo el bootstrap.
-    """
     db     = get_supabase_autenticado()
     estado = session["estado"]
     return jsonify({"cerrado": _proceso_cerrado(db, estado)})
@@ -1062,20 +898,12 @@ def proceso_cerrado_endpoint():
 # ==============================================================
 
 def _proceso_cerrado(db, estado: str) -> bool:
-    """
-    Consulta la tabla `estados_proceso` y devuelve True si
-    el proceso del estado dado está marcado como cerrado.
-    Centraliza esta lógica para evitar duplicación.
-    """
     resp = db.table("estados_proceso") \
         .select("cerrado").eq("estado", estado).execute()
     return bool(resp.data and resp.data[0].get("cerrado"))
 
 # ==============================================================
 # HEALTH CHECKS
-# /healthz → liveness:  el proceso está corriendo
-# /readyz  → readiness: el proceso puede atender tráfico
-#            (verifica conexión a Supabase)
 # ==============================================================
 
 @app.route("/healthz")

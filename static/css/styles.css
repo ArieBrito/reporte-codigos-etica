@@ -808,3 +808,107 @@ tr:hover { background: #fafafa; }
     .header        { flex-direction: column; gap: 10px; }
     h1             { text-align: center; margin-left: 0; padding: 0 5vw; }
 }
+
+
+.controles-barra {
+    display: flex;
+    flex-wrap: wrap;
+    gap: .75rem;
+    align-items: center;
+    margin-bottom: 1.25rem;
+}
+
+.buscador-wrapper {
+    position: relative;
+    flex: 1 1 240px;
+}
+
+.buscador-wrapper svg {
+    position: absolute;
+    left: .75rem;
+    top: 50%;
+    transform: translateY(-50%);
+    pointer-events: none;
+    color: #888;
+}
+
+#buscadorInput {
+    width: 100%;
+    padding: .55rem .75rem .55rem 2.4rem;
+    border: 1px solid #d0d0d0;
+    border-radius: 8px;
+    font-size: .95rem;
+    box-sizing: border-box;
+    outline: none;
+    transition: border-color .2s;
+}
+#buscadorInput:focus { border-color: #A11C3A; }
+
+.paginacion-info {
+    font-size: .875rem;
+    color: #555;
+    white-space: nowrap;
+}
+
+/* ── Paginación ─────────────────────────────────────────── */
+.paginacion {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    gap: .5rem;
+    margin: 1.5rem 0 .75rem;
+    flex-wrap: wrap;
+}
+
+.paginacion button {
+    min-width: 2.2rem;
+    padding: .35rem .7rem;
+    border: 1px solid #ccc;
+    border-radius: 6px;
+    background: #fff;
+    font-size: .875rem;
+    cursor: pointer;
+    transition: background .15s, color .15s, border-color .15s;
+}
+
+.paginacion button:hover:not(:disabled) {
+    background: #f0e8ea;
+    border-color: #A11C3A;
+    color: #A11C3A;
+}
+
+.paginacion button.activa {
+    background: #A11C3A;
+    color: #fff;
+    border-color: #A11C3A;
+    font-weight: 700;
+}
+
+.paginacion button:disabled {
+    opacity: .4;
+    cursor: default;
+}
+
+/* ── Sin resultados ─────────────────────────────────────── */
+#sinResultados {
+    display: none;
+    text-align: center;
+    color: #888;
+    padding: 2rem 0;
+    font-size: 1rem;
+}
+
+/* ── Botón guardar individual en cada card ──────────────── */
+.btn-guardar-card {
+    margin-top: .5rem;
+    background: #2563EB;
+    color: #fff;
+    border: none;
+    border-radius: 6px;
+    padding: .45rem 1rem;
+    cursor: pointer;
+    font-size: .9rem;
+    transition: background .2s;
+}
+.btn-guardar-card:hover { background: #1D4ED8; }
+.btn-guardar-card:disabled { opacity: .5; cursor: default; }

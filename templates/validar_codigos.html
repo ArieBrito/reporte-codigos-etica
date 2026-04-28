@@ -6,17 +6,138 @@
 
 {% block content %}
 
+<style>
+/* ── Buscador y controles de paginación ─────────────────── */
+.controles-barra {
+    display: flex;
+    flex-wrap: wrap;
+    gap: .75rem;
+    align-items: center;
+    margin-bottom: 1.25rem;
+}
+
+.buscador-wrapper {
+    position: relative;
+    flex: 1 1 240px;
+}
+
+.buscador-wrapper svg {
+    position: absolute;
+    left: .75rem;
+    top: 50%;
+    transform: translateY(-50%);
+    pointer-events: none;
+    color: #888;
+}
+
+#buscadorInput {
+    width: 100%;
+    padding: .55rem .75rem .55rem 2.4rem;
+    border: 1px solid #d0d0d0;
+    border-radius: 8px;
+    font-size: .95rem;
+    box-sizing: border-box;
+    outline: none;
+    transition: border-color .2s;
+}
+#buscadorInput:focus { border-color: #A11C3A; }
+
+.paginacion-info {
+    font-size: .875rem;
+    color: #555;
+    white-space: nowrap;
+}
+
+/* ── Paginación ─────────────────────────────────────────── */
+.paginacion {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    gap: .5rem;
+    margin: 1.5rem 0 .75rem;
+    flex-wrap: wrap;
+}
+
+.paginacion button {
+    min-width: 2.2rem;
+    padding: .35rem .7rem;
+    border: 1px solid #ccc;
+    border-radius: 6px;
+    background: #fff;
+    font-size: .875rem;
+    cursor: pointer;
+    transition: background .15s, color .15s, border-color .15s;
+}
+
+.paginacion button:hover:not(:disabled) {
+    background: #f0e8ea;
+    border-color: #A11C3A;
+    color: #A11C3A;
+}
+
+.paginacion button.activa {
+    background: #A11C3A;
+    color: #fff;
+    border-color: #A11C3A;
+    font-weight: 700;
+}
+
+.paginacion button:disabled {
+    opacity: .4;
+    cursor: default;
+}
+
+/* ── Sin resultados ─────────────────────────────────────── */
+#sinResultados {
+    display: none;
+    text-align: center;
+    color: #888;
+    padding: 2rem 0;
+    font-size: 1rem;
+}
+
+/* ── Botón guardar individual en cada card ──────────────── */
+.btn-guardar-card {
+    margin-top: .5rem;
+    background: #2563EB;
+    color: #fff;
+    border: none;
+    border-radius: 6px;
+    padding: .45rem 1rem;
+    cursor: pointer;
+    font-size: .9rem;
+    transition: background .2s;
+}
+.btn-guardar-card:hover { background: #1D4ED8; }
+.btn-guardar-card:disabled { opacity: .5; cursor: default; }
+</style>
+
 <div class="codigos-container">
 
 <h1 class="title">Reporte de Códigos de Ética</h1>
-<h2>2. Verifiación de códigos de ética</h2>
+<h2>2. Verificación de códigos de ética</h2>
+
+<!-- ── Barra de controles ─────────────────────────────── -->
+<div class="controles-barra">
+    <div class="buscador-wrapper">
+        <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"
+             viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
+        <input id="buscadorInput" type="text" placeholder="Buscar institución…" oninput="aplicarFiltro()">
+    </div>
+    <span class="paginacion-info" id="paginacionInfo"></span>
+</div>
 
 <div id="contenedor"></div>
+<p id="sinResultados">No se encontraron instituciones con ese término.</p>
+
+<!-- Paginación superior e inferior -->
+<div class="paginacion" id="paginacionTop"></div>
+<div class="paginacion" id="paginacionBottom"></div>
 
 <br>
 
 <button type="button" onclick="window.location.href= window.BASE_URL + '/validar-instituciones'">
-← Volver a verificación de Entes Públicos
+    ← Volver a verificación de Entes Públicos
 </button>
 
 <button type="button" onclick="guardarTodo()" class="btn-guardar">Guardar todo</button>
@@ -29,36 +150,33 @@
     Enviar información
 </button>
 
-<!-- ================================
-MODAL DE CONFIRMACIÓN
-================================ -->
+<!-- ── Modal de confirmación ─────────────────────────── -->
 <div id="confirmModal" class="modal-overlay">
   <div class="modal-box">
-
-    <div class="modal-header">
-      ⚠ Confirmación de envío
-    </div>
-
+    <div class="modal-header">⚠ Confirmación de envío</div>
     <div class="modal-body">
-
       <p>Al enviar la información:</p>
-
       <ul>
         <li>Se generará un <b>acuse</b></li>
         <li>No podrás <b>editar nuevamente</b></li>
       </ul>
-
     </div>
-
     <div class="modal-actions">
       <button class="btn-cancel" onclick="cerrarConfirm()">Cancelar</button>
       <button class="btn-confirm" onclick="confirmarEnvio()">Enviar información</button>
     </div>
-
   </div>
 </div>
 
 <script>
+
+/* =========================================
+   CONSTANTES DE PAGINACIÓN
+========================================= */
+const ITEMS_POR_PAGINA = 10;
+let paginaActual = 1;
+let todasLasCards = [];   // NodeList → Array de divs .card
+let cardsFiltradas = [];  // subconjunto tras búsqueda
 
 /* =========================================
    UTILIDAD NORMALIZAR
@@ -75,50 +193,141 @@ function normalizar(txt) {
    HABILITAR / DESHABILITAR CAMPOS
 ========================================= */
 function actualizarDependencias(card) {
-
     const idUnico = card.dataset.idUnico;
-    const cuentaSeleccionada = card.querySelector(
-        `input[name="cuenta_${idUnico}"]:checked`
-    );
+    const cuentaSeleccionada = card.querySelector(`input[name="cuenta_${idUnico}"]:checked`);
 
     const linkInput    = card.querySelector(`#${CSS.escape('link_'    + idUnico)}`);
     const fechaInput   = card.querySelector(`#${CSS.escape('fecha_'   + idUnico)}`);
     const numInput     = card.querySelector(`#${CSS.escape('num_'     + idUnico)}`);
-    const radiosCumple = card.querySelectorAll(
-        `input[name="cumple_${idUnico}"]`
-    );
+    const radiosCumple = card.querySelectorAll(`input[name="cumple_${idUnico}"]`);
 
     if (!cuentaSeleccionada) return;
 
-    if (cuentaSeleccionada.value === "No" ||
-        cuentaSeleccionada.value === "No se recibió información") {
+    // Solo modificar habilitación si la card está en modo edición
+    const enEdicion = card.dataset.editando === "true";
+    const esNegativo = cuentaSeleccionada.value === "No" ||
+                       cuentaSeleccionada.value === "No se recibió información";
 
-        linkInput.disabled = true;
-        fechaInput.disabled = true;
-        numInput.disabled = true;
-        radiosCumple.forEach(r => r.disabled = true);
+    // Los campos dependientes se habilitan SOLO si está editando Y la respuesta es "Sí"
+    const bloquearDependientes = !enEdicion || esNegativo;
 
-        linkInput.value = "";
+    linkInput.disabled  = bloquearDependientes;
+    fechaInput.disabled = bloquearDependientes;
+    numInput.disabled   = bloquearDependientes;
+    radiosCumple.forEach(r => r.disabled = bloquearDependientes);
+
+    if (esNegativo) {
+        linkInput.value  = "";
         fechaInput.value = "";
-        numInput.value = "0";
+        numInput.value   = "0";
         radiosCumple.forEach(r => r.checked = false);
-
-    } else {
-
-        linkInput.disabled = false;
-        fechaInput.disabled = false;
-        numInput.disabled = false;
-        radiosCumple.forEach(r => r.disabled = false);
     }
 }
 
+/* =========================================
+   PAGINACIÓN: RENDERIZAR PÁGINA
+========================================= */
+function renderizarPagina() {
+    const total   = cardsFiltradas.length;
+    const inicio  = (paginaActual - 1) * ITEMS_POR_PAGINA;
+    const fin     = Math.min(inicio + ITEMS_POR_PAGINA, total);
+
+    // Ocultar todas, mostrar sólo las de la página actual
+    todasLasCards.forEach(c => c.style.display = "none");
+    cardsFiltradas.slice(inicio, fin).forEach(c => c.style.display = "");
+
+    // Info
+    const infoEl = document.getElementById("paginacionInfo");
+    if (total === 0) {
+        infoEl.textContent = "";
+    } else {
+        infoEl.textContent = `Mostrando ${inicio + 1}–${fin} de ${total} institución${total !== 1 ? "es" : ""}`;
+    }
+
+    // Sin resultados
+    document.getElementById("sinResultados").style.display = total === 0 ? "block" : "none";
+
+    // Botones de paginación
+    renderizarBotonesPaginacion(total);
+}
+
+function renderizarBotonesPaginacion(total) {
+    const totalPaginas = Math.ceil(total / ITEMS_POR_PAGINA);
+
+    ["paginacionTop", "paginacionBottom"].forEach(id => {
+        const nav = document.getElementById(id);
+        nav.innerHTML = "";
+
+        if (totalPaginas <= 1) return;
+
+        // Anterior
+        const btnPrev = document.createElement("button");
+        btnPrev.textContent = "‹ Anterior";
+        btnPrev.disabled = paginaActual === 1;
+        btnPrev.onclick = () => irAPagina(paginaActual - 1);
+        nav.appendChild(btnPrev);
+
+        // Números
+        const rango = paginasVisibles(paginaActual, totalPaginas);
+        let ultimoRenderizado = 0;
+        rango.forEach(p => {
+            if (p - ultimoRenderizado > 1) {
+                const dots = document.createElement("button");
+                dots.textContent = "…"; dots.disabled = true;
+                nav.appendChild(dots);
+            }
+            const btn = document.createElement("button");
+            btn.textContent = p;
+            if (p === paginaActual) btn.classList.add("activa");
+            btn.onclick = () => irAPagina(p);
+            nav.appendChild(btn);
+            ultimoRenderizado = p;
+        });
+
+        // Siguiente
+        const btnNext = document.createElement("button");
+        btnNext.textContent = "Siguiente ›";
+        btnNext.disabled = paginaActual === totalPaginas;
+        btnNext.onclick = () => irAPagina(paginaActual + 1);
+        nav.appendChild(btnNext);
+    });
+}
+
+function paginasVisibles(actual, total) {
+    // Muestra siempre primera, última y hasta 3 alrededor de la actual
+    const set = new Set([1, total]);
+    for (let p = Math.max(1, actual - 2); p <= Math.min(total, actual + 2); p++) set.add(p);
+    return [...set].sort((a, b) => a - b);
+}
+
+function irAPagina(p) {
+    paginaActual = p;
+    renderizarPagina();
+    window.scrollTo({ top: 0, behavior: "smooth" });
+}
+
+/* =========================================
+   FILTRO POR TEXTO
+========================================= */
+function aplicarFiltro() {
+    const termino = normalizar(
+        document.getElementById("buscadorInput").value.replace(/\s+/g, "_")
+    );
+
+    cardsFiltradas = termino
+        ? todasLasCards.filter(c =>
+            normalizar(c.dataset.nombre).includes(termino.replace(/_/g, "")) ||
+            normalizar(c.dataset.nombre).includes(termino)
+          )
+        : [...todasLasCards];
+
+    paginaActual = 1;
+    renderizarPagina();
+}
 
 /* =========================================
    CARGA INICIAL
 ========================================= */
-
-// FIX 1: Variable boot accesible en todo el scope del script
-// para que editarCode pueda consultar boot.cerrado
 let bootData = null;
 
 Loader.show("Cargando códigos de ética");
@@ -126,13 +335,12 @@ fetch(window.BASE_URL + '/bootstrap-codigos')
 .then(r => r.json())
 .then(boot => {
 
-    bootData = boot; // FIX 1: guardar referencia global
+    bootData = boot;
 
     const instituciones = boot.instituciones;
     const datosCodigos  = boot.datos;
     const codigosMap    = new Set(boot.estatus);
-
-    const contenedor = document.getElementById('contenedor');
+    const contenedor    = document.getElementById('contenedor');
 
     if (!instituciones.length) {
         const _p = document.createElement('p');
@@ -142,18 +350,16 @@ fetch(window.BASE_URL + '/bootstrap-codigos')
     }
 
     instituciones.forEach(inst => {
-
         const nombreOriginal = inst.nombre;
-        const nombreSeguro = nombreOriginal.replace(/"/g, '&quot;');
-        const idUnico = normalizar(nombreOriginal);
-
-        // Datos previamente guardados para esta institución (si existen)
-        const guardado = datosCodigos[idUnico] || null;
+        const idUnico        = normalizar(nombreOriginal);
+        const guardado       = datosCodigos[idUnico] || null;
 
         const div = document.createElement('div');
-        div.className = 'card';
-        div.dataset.nombre = nombreOriginal;
-        div.dataset.idUnico = idUnico;
+        div.className    = 'card';
+        div.dataset.nombre   = nombreOriginal;
+        div.dataset.idUnico  = idUnico;
+        div.dataset.editando = "false";
+        div.style.display    = "none"; // la paginación controla la visibilidad
 
         // ── Título ──────────────────────────────────────────
         const h3 = document.createElement('h3');
@@ -164,8 +370,8 @@ fetch(window.BASE_URL + '/bootstrap-codigos')
         const pCuenta = document.createElement('p');
         pCuenta.textContent = '¿Cuenta con un Código de Ética publicado?';
         pCuenta.appendChild(document.createElement('br'));
-        [['Sí', guardado?.cuenta_codigo === 'Sí'],
-         ['No', guardado?.cuenta_codigo === 'No'],
+        [['Sí',                    guardado?.cuenta_codigo === 'Sí'],
+         ['No',                    guardado?.cuenta_codigo === 'No'],
          ['No se recibió información', guardado?.cuenta_codigo === 'No se recibió información']
         ].forEach(([val, chk]) => {
             const lbl = document.createElement('label');
@@ -227,25 +433,46 @@ fetch(window.BASE_URL + '/bootstrap-codigos')
         pNum.appendChild(numInput);
         div.appendChild(pNum);
 
-        // ── Botón editar (guardar es por lote desde "Guardar todo") ──
+        // ── Fila de botones ──────────────────────────────────
+        const filaBotones = document.createElement('div');
+        filaBotones.style.cssText = "display:flex;gap:.5rem;margin-top:.5rem;flex-wrap:wrap;";
+
         const btnEditar = document.createElement('button');
         btnEditar.textContent = 'Editar';
         btnEditar.onclick = () => editarCode(btnEditar);
-        div.appendChild(btnEditar);
+        filaBotones.appendChild(btnEditar);
+
+        const btnGuardarCard = document.createElement('button');
+        btnGuardarCard.textContent = 'Guardar';
+        btnGuardarCard.className   = 'btn-guardar-card';
+        btnGuardarCard.disabled    = true;
+        btnGuardarCard.onclick     = () => guardarCard(div, btnGuardarCard);
+        filaBotones.appendChild(btnGuardarCard);
+
+        div.appendChild(filaBotones);
 
         // Si ya tiene datos guardados, marcar como validado
         if (codigosMap.has(idUnico)) {
             div.classList.add('codigo-validado');
         }
 
+        // Escuchar cambio en ¿cuenta con código?
         div.querySelectorAll(`input[name="cuenta_${idUnico}"]`)
             .forEach(radio => {
-                radio.addEventListener("change", () => {
-                    actualizarDependencias(div);
-                });
+                radio.addEventListener("change", () => actualizarDependencias(div));
             });
 
-        // Si "No" estaba guardado, deshabilitar campos dependientes
+        // Habilitar botón Guardar al editar cualquier campo
+        div.addEventListener("change", () => {
+            if (!div.querySelector('input[disabled]') ||
+                div.querySelectorAll('input:not([disabled])').length > 0) {
+                // Si algún input está habilitado, activar botón guardar
+                if (!btnGuardarCard.disabled || !boot.cerrado) {
+                    // sólo si no está cerrado
+                }
+            }
+        });
+
         if (guardado?.cuenta_codigo === 'No' ||
             guardado?.cuenta_codigo === 'No se recibió información') {
             actualizarDependencias(div);
@@ -254,18 +481,22 @@ fetch(window.BASE_URL + '/bootstrap-codigos')
         contenedor.appendChild(div);
     });
 
-    // Verificar cierre usando boot.cerrado — sin fetch extra
+    // Inicializar listas de paginación/filtro
+    todasLasCards   = [...contenedor.querySelectorAll('.card')];
+    cardsFiltradas  = [...todasLasCards];
+    renderizarPagina();
+
+    // Proceso cerrado
     if (boot.cerrado) {
         document.querySelectorAll('.card input').forEach(i => i.disabled = true);
         document.querySelectorAll('.card button').forEach(b => b.disabled = true);
         document.querySelectorAll('button').forEach(b => {
-            if (b.textContent.trim().startsWith('←')) return;
-            if (b.textContent.trim().startsWith('Descargar')) return;
-            if (b.textContent.trim().startsWith('Guardar todo')) return;
+            const txt = b.textContent.trim();
+            if (txt.startsWith('←') || txt.startsWith('Descargar') || txt.startsWith('Guardar todo')) return;
             b.disabled = true;
         });
         const aviso = document.createElement('div');
-        aviso.className = 'aviso-cerrado';
+        aviso.className   = 'aviso-cerrado';
         aviso.textContent = '⚠ Este proceso ya fue enviado y está cerrado. No es posible realizar modificaciones.';
         document.querySelector('.codigos-container').prepend(aviso);
     }
@@ -278,25 +509,98 @@ fetch(window.BASE_URL + '/bootstrap-codigos')
    EDITAR
 ========================================= */
 function editarCode(btn) {
-
-    const card = btn.parentElement;
-
-    // FIX 1: No permitir edición si el proceso está cerrado
     if (bootData?.cerrado) return;
+    const card = btn.closest('.card');
+    const idUnico = card.dataset.idUnico;
 
-    card.querySelectorAll('input').forEach(i => i.disabled = false);
+    // Marcar card como en edición ANTES de actualizarDependencias
+    card.dataset.editando = "true";
 
-    // actualizarDependencias ya estaba aquí pero ahora es efectivo
-    // porque la guarda de bootData garantiza que sólo llega si !cerrado
+    // Habilitar radios de "cuenta con código"
+    card.querySelectorAll(`input[name="cuenta_${idUnico}"]`).forEach(i => i.disabled = false);
+
+    // actualizarDependencias habilitará los campos dependientes según la selección
     actualizarDependencias(card);
+
+    // Habilitar botón Guardar de la card
+    const btnGuardar = card.querySelector('.btn-guardar-card');
+    if (btnGuardar) btnGuardar.disabled = false;
 }
 
+/* =========================================
+   GUARDAR UNA SOLA CARD
+========================================= */
+function guardarCard(card, btnGuardar) {
+    const nombreOriginal = card.dataset.nombre;
+    const idUnico        = card.dataset.idUnico;
+    const cuenta  = card.querySelector(`input[name="cuenta_${idUnico}"]:checked`)?.value || '';
+    const cumple  = card.querySelector(`input[name="cumple_${idUnico}"]:checked`)?.value || '';
+    const link    = card.querySelector(`#${CSS.escape('link_'  + idUnico)}`)?.value.trim() ?? '';
+    const fecha   = card.querySelector(`#${CSS.escape('fecha_' + idUnico)}`)?.value ?? '';
+    const num     = card.querySelector(`#${CSS.escape('num_'   + idUnico)}`)?.value ?? '0';
+
+    // Validación si cuenta con código
+    if (cuenta === 'Sí') {
+        const faltantes = [];
+        if (!link)                       faltantes.push('Enlace');
+        if (!fecha)                      faltantes.push('Fecha de publicación');
+        if (!cumple)                     faltantes.push('¿Cumple lineamientos?');
+        if (!num || parseInt(num) === 0) faltantes.push('Número de instituciones destinatarias');
+        if (faltantes.length) {
+            alert(`Corrige los siguientes campos obligatorios en "${nombreOriginal}":\n\n• ${faltantes.join('\n• ')}`);
+            return;
+        }
+    }
+
+    // Construir payload con el resto de cards SIN MODIFICAR (para no perder datos)
+    // Se manda sólo esta card como upsert parcial; el servidor usa DELETE+INSERT por estado,
+    // así que mandamos TODAS las cards completas igual que guardarTodo pero sólo 1.
+    // Para evitar borrar otras, re-enviamos un payload con todas las cards visibles.
+    const todasCards = document.querySelectorAll('.card');
+    const payload = [];
+
+    todasCards.forEach(c => {
+        const nOrig = c.dataset.nombre;
+        const id    = c.dataset.idUnico;
+        const esCuentaInput = c.querySelector(`input[name="cuenta_${id}"]:checked`);
+        const esCumpleInput = c.querySelector(`input[name="cumple_${id}"]:checked`);
+        payload.push({
+            nombre:              nOrig,
+            cuenta_codigo:       esCuentaInput?.value || '',
+            link:                c.querySelector(`#${CSS.escape('link_'  + id)}`)?.value.trim() ?? '',
+            fecha_publicacion:   c.querySelector(`#${CSS.escape('fecha_' + id)}`)?.value ?? '',
+            cumple_lineamientos: esCumpleInput?.value || '',
+            num_instituciones:   parseInt(c.querySelector(`#${CSS.escape('num_' + id)}`)?.value || '0') || 0,
+        });
+    });
+
+    btnGuardar.disabled = true;
+    Loader.show("Guardando…");
+
+    fetch(window.BASE_URL + '/guardar-validacion-codigos', {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify(payload)
+    })
+    .then(r => r.json())
+    .then(() => {
+        card.dataset.editando = "false";
+        card.querySelectorAll('input').forEach(i => i.disabled = true);
+        card.classList.add('codigo-validado');
+        btnGuardar.disabled = true;
+        alert(`✓ "${nombreOriginal}" guardada correctamente.`);
+    })
+    .catch(() => {
+        btnGuardar.disabled = false;
+        alert('No se pudo guardar la información.');
+    })
+    .finally(() => Loader.hide());
+}
 
 /* =========================================
-   GUARDAR POR LOTE
+   GUARDAR POR LOTE (todas)
 ========================================= */
 function guardarTodo() {
-
     const cards = document.querySelectorAll('.card');
     if (!cards.length) { alert('No hay información que guardar'); return; }
 
@@ -308,29 +612,28 @@ function guardarTodo() {
         const idUnico        = card.dataset.idUnico;
         const cuenta = card.querySelector(`input[name="cuenta_${idUnico}"]:checked`)?.value || '';
         const cumple = card.querySelector(`input[name="cumple_${idUnico}"]:checked`)?.value || '';
-        const link  = card.querySelector(`#${CSS.escape('link_'  + idUnico)}`)?.value.trim() ?? '';
-        const fecha = card.querySelector(`#${CSS.escape('fecha_' + idUnico)}`)?.value ?? '';
-        const num   = card.querySelector(`#${CSS.escape('num_'   + idUnico)}`)?.value ?? '0';
+        const link   = card.querySelector(`#${CSS.escape('link_'  + idUnico)}`)?.value.trim() ?? '';
+        const fecha  = card.querySelector(`#${CSS.escape('fecha_' + idUnico)}`)?.value ?? '';
+        const num    = card.querySelector(`#${CSS.escape('num_'   + idUnico)}`)?.value ?? '0';
 
-    if (cuenta === 'Sí') {
-        const camposFaltantes = [];
-        if (!link)                       camposFaltantes.push('Enlace');
-        if (!fecha)                      camposFaltantes.push('Fecha de publicación');
-        if (!cumple)                     camposFaltantes.push('¿Cumple lineamientos?');
-        if (!num || parseInt(num) === 0) camposFaltantes.push('Número de instituciones destinatarias');
-
-        if (camposFaltantes.length) {
-            errores.push(`• ${nombreOriginal}:\n    ${camposFaltantes.join(', ')}`);
+        if (cuenta === 'Sí') {
+            const camposFaltantes = [];
+            if (!link)                       camposFaltantes.push('Enlace');
+            if (!fecha)                      camposFaltantes.push('Fecha de publicación');
+            if (!cumple)                     camposFaltantes.push('¿Cumple lineamientos?');
+            if (!num || parseInt(num) === 0) camposFaltantes.push('Número de instituciones destinatarias');
+            if (camposFaltantes.length) {
+                errores.push(`• ${nombreOriginal}:\n    ${camposFaltantes.join(', ')}`);
+            }
         }
-    }
 
         payload.push({
-            nombre: nombreOriginal,
-            cuenta_codigo: cuenta,
+            nombre:              nombreOriginal,
+            cuenta_codigo:       cuenta,
             link,
-            fecha_publicacion: fecha,
+            fecha_publicacion:   fecha,
             cumple_lineamientos: cumple,
-            num_instituciones: parseInt(num) || 0  // FIX 3: enviar número, no string
+            num_instituciones:   parseInt(num) || 0
         });
     });
 
@@ -349,18 +652,18 @@ function guardarTodo() {
     .then(() => {
         alert('Información guardada correctamente');
         cards.forEach(card => {
+            card.dataset.editando = "false";
             card.querySelectorAll('input').forEach(i => i.disabled = true);
             card.classList.add('codigo-validado');
-            actualizarDependencias(card); // FIX 2: restaurar estado visual de dependencias
+            card.querySelector('.btn-guardar-card').disabled = true;
         });
     })
     .catch(() => alert('No se pudo guardar la información'))
     .finally(() => Loader.hide());
 }
 
-
 /* =========================================
-   ABRIR MODAL
+   MODAL ENVÍO
 ========================================= */
 function enviarValidacion(){
     const cards = document.querySelectorAll('.card');
@@ -379,10 +682,6 @@ function cerrarConfirm(){
     document.getElementById("confirmModal").style.display = "none";
 }
 
-
-/* =========================================
-   CONFIRMAR ENVÍO
-========================================= */
 function confirmarEnvio(){
     cerrarConfirm();
     Loader.show("Generando acuse");
@@ -390,7 +689,7 @@ function confirmarEnvio(){
     fetch(window.BASE_URL + '/enviar-validacion', { method: 'POST' })
     .then(r => r.json())
     .then(resp => {
-        Loader.hide()
+        Loader.hide();
 
         function urlSegura(url) {
             try {
@@ -401,24 +700,23 @@ function confirmarEnvio(){
 
         const modal = document.getElementById("confirmModal");
         while (modal.firstChild) modal.removeChild(modal.firstChild);
-        const box    = document.createElement('div'); box.className = 'modal-box';
-        const hdr    = document.createElement('div'); hdr.className = 'modal-header';
+        const box  = document.createElement('div'); box.className = 'modal-box';
+        const hdr  = document.createElement('div'); hdr.className = 'modal-header';
         hdr.textContent = 'Información enviada correctamente';
-        const bdy    = document.createElement('div'); bdy.className = 'modal-body';
-        const pMsg   = document.createElement('p');
+        const bdy  = document.createElement('div'); bdy.className = 'modal-body';
+        const pMsg = document.createElement('p');
         pMsg.textContent = 'Tu reporte ha sido enviado y el proceso ha quedado formalmente cerrado.';
         bdy.appendChild(pMsg);
-        const acts   = document.createElement('div'); acts.className = 'modal-actions';
-        const aPdf   = document.createElement('a');
+        const acts  = document.createElement('div'); acts.className = 'modal-actions';
+        const aPdf  = document.createElement('a');
         aPdf.href = urlSegura(resp.pdf); aPdf.target = '_blank';
         aPdf.className = 'btn-confirm'; aPdf.textContent = 'Descargar acuse';
-        const aHome  = document.createElement('a');
+        const aHome = document.createElement('a');
         aHome.href = window.BASE_URL + '/'; aHome.className = 'btn-cancel'; aHome.textContent = 'Ir al inicio';
         acts.appendChild(aPdf); acts.appendChild(aHome);
         box.appendChild(hdr); box.appendChild(bdy); box.appendChild(acts);
         modal.appendChild(box);
         modal.style.display = "flex";
-
     })
     .catch(() => {
         Loader.hide();
