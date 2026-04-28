@@ -610,7 +610,7 @@ def enviar_validacion():
         except locale.Error:
             pass
 
-    fecha_larga = f"{datetime.now().day} de {datetime.now().strftime('%B')} de {datetime.now().year}"
+    fecha_larga = datetime.now().strftime("%d/%m/%Y")
 
     # ── F2-04: verificar cobertura completa ────────────────────
     resp_entes = db.table("entes_confirmados") \
@@ -859,8 +859,7 @@ def enviar_validacion():
             f"Se emite el presente acuse a la Secretaría Ejecutiva del Sistema Estatal "
             f"Anticorrupción de <b>{estado}</b>, en virtud de haber concluido la integración "
             f"de la información relativa al seguimiento de la emisión de Códigos de Ética, "
-            f"el día <b>{datetime.now().strftime('%d/%m/%Y')}</b> "
-            f"a las <b>{datetime.now().strftime('%H:%M hrs')}</b>.",
+            f"el día <b>{datetime.now().strftime('%d/%m/%Y')}</b>.",
             estilo_intro
         ),
         Spacer(1, 0.08 * inch),
