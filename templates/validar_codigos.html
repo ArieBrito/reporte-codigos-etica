@@ -81,9 +81,9 @@ function actualizarDependencias(card) {
         `input[name="cuenta_${idUnico}"]:checked`
     );
 
-    const linkInput = card.querySelector(`#link_${idUnico}`);
-    const fechaInput = card.querySelector(`#fecha_${idUnico}`);
-    const numInput = card.querySelector(`#num_${idUnico}`);
+    const linkInput    = card.querySelector(`#${CSS.escape('link_'    + idUnico)}`);
+    const fechaInput   = card.querySelector(`#${CSS.escape('fecha_'   + idUnico)}`);
+    const numInput     = card.querySelector(`#${CSS.escape('num_'     + idUnico)}`);
     const radiosCumple = card.querySelectorAll(
         `input[name="cumple_${idUnico}"]`
     );
@@ -308,9 +308,9 @@ function guardarTodo() {
         const idUnico        = card.dataset.idUnico;
         const cuenta = card.querySelector(`input[name="cuenta_${idUnico}"]:checked`)?.value || '';
         const cumple = card.querySelector(`input[name="cumple_${idUnico}"]:checked`)?.value || '';
-        const link   = card.querySelector(`#link_${idUnico}`).value.trim();
-        const fecha  = card.querySelector(`#fecha_${idUnico}`).value;
-        const num    = card.querySelector(`#num_${idUnico}`).value;
+        const link  = card.querySelector(`#${CSS.escape('link_'  + idUnico)}`)?.value.trim() ?? '';
+        const fecha = card.querySelector(`#${CSS.escape('fecha_' + idUnico)}`)?.value ?? '';
+        const num   = card.querySelector(`#${CSS.escape('num_'   + idUnico)}`)?.value ?? '0';
 
     if (cuenta === 'Sí') {
         const camposFaltantes = [];
