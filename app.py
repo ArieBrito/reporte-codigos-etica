@@ -546,44 +546,43 @@ def validar_codigos():
 @app.route("/guardar-validacion-codigos", methods=["POST"])
 @login_required
 def guardar_validacion_codigos():
-    """
-    Persiste los datos de códigos de ética.
-    Estrategia: DELETE + INSERT para manejar correctamente
-    cualquier cambio de nombre que venga de validar_instituciones.
-    """
-    estado = session["estado"]
-    db     = get_supabase_autenticado()
- 
-    if _proceso_cerrado(db, estado):
-        return jsonify({"error": "Proceso cerrado"}), 403
- 
-    registros = []
-    for fila in request.get_json():
-        num = fila.get("num_instituciones")
-        try:
-            num = int(num) if num not in (None, "") else 0
-        except (ValueError, TypeError):
-            num = 0
- 
-        registros.append({
-            "estado":              estado,
-            "nombre":              limpiar(fila.get("nombre")),
-            "cuenta_codigo":       limpiar(fila.get("cuenta_codigo")),
-            "link":                limpiar(fila.get("link")),
-            "fecha_publicacion":   limpiar(fila.get("fecha_publicacion")) or None,
-            "cumple_lineamientos": limpiar(fila.get("cumple_lineamientos")),
-            "num_instituciones":   num,
-        })
- 
-    # ── FIX: borrar y re-insertar para evitar nombres huérfanos ──
-    db.table("codigos_etica") \
-        .delete().eq("estado", estado).execute()
- 
-    if registros:
-        db.table("codigos_etica").insert(registros).execute()
- 
-    invalidar_cache()
-    return jsonify({"status": "ok"})
+    try:
+        estado = session["estado"]
+        db     = get_supabase_autenticado()
+
+        if _proceso_cerrado(db, estado):
+            return jsonify({"error": "Proceso cerrado"}), 403
+
+        registros = []
+        for fila in request.get_json():
+            num = fila.get("num_instituciones")
+            try:
+                num = int(num) if num not in (None, "") else 0
+            except (ValueError, TypeError):
+                num = 0
+
+            registros.append({
+                "estado":              estado,
+                "nombre":              limpiar(fila.get("nombre")),
+                "cuenta_codigo":       limpiar(fila.get("cuenta_codigo")),
+                "link":                limpiar(fila.get("link")),
+                "fecha_publicacion":   limpiar(fila.get("fecha_publicacion")) or None,
+                "cumple_lineamientos": limpiar(fila.get("cumple_lineamientos")),
+                "num_instituciones":   num,
+            })
+
+        db.table("codigos_etica").delete().eq("estado", estado).execute()
+
+        if registros:
+            db.table("codigos_etica").insert(registros).execute()
+
+        invalidar_cache()
+        return jsonify({"status": "ok"})
+
+    except Exception as e:
+        import traceback
+        print(traceback.format_exc())
+        return jsonify({"error": str(e)}), 500
     
 # ==============================================================
 # ENVÍO FINAL + GENERACIÓN DE PDF

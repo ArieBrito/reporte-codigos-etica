@@ -19,13 +19,13 @@
 ← Volver a verificación de Entes Públicos
 </button>
 
-<button onclick="guardarTodo()" class="btn-guardar">Guardar todo</button>
+<button type="button" onclick="guardarTodo()" class="btn-guardar">Guardar todo</button>
 
 <button type="button" onclick="window.location.href= window.BASE_URL + '/descarga/codigos'" class="btn-guardar">
     Descargar información
 </button>
 
-<button onclick="enviarValidacion()" class="btn-enviar">
+<button type="button" onclick="enviarValidacion()" class="btn-enviar">
     Enviar información
 </button>
 
@@ -363,6 +363,15 @@ function guardarTodo() {
    ABRIR MODAL
 ========================================= */
 function enviarValidacion(){
+    const cards = document.querySelectorAll('.card');
+    const sinGuardar = [...cards].filter(card => !card.classList.contains('codigo-validado'));
+
+    if (sinGuardar.length) {
+        const nombres = sinGuardar.map(c => `• ${c.dataset.nombre}`).join('\n');
+        alert('Debes guardar toda la información antes de enviar.\n\nInstituciones pendientes:\n\n' + nombres);
+        return;
+    }
+
     document.getElementById("confirmModal").style.display = "flex";
 }
 
