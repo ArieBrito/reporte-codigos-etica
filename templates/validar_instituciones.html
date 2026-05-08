@@ -129,12 +129,14 @@ fetch(window.BASE_URL + '/bootstrap-instituciones')
         const formulario = document.getElementById('formulario-dinamico');
 
         (data || []).forEach(fila => {
+            const nombre = fila.nombre || '';
             const normalizada = {
-                id:            fila.id,
-                nombre:        fila.nombre || '',
-                poderGobierno: fila.poderGobierno || fila.poder_gobierno || '',
-                confirmado:    fila.confirmado || false,
-                verificado:    fila.verificado || false,
+                id:             fila.id,
+                nombre:         nombre,
+                nombreOriginal: nombre,   // 👈 guardamos el nombre tal como vino de BD
+                poderGobierno:  fila.poderGobierno || fila.poder_gobierno || '',
+                confirmado:     fila.confirmado || false,
+                verificado:     fila.verificado || false,
             };
             filasOriginales[normalizada.id] = normalizada;
             crearFila(normalizada, formulario);
@@ -218,6 +220,9 @@ function crearFila(fila, formulario, esNueva = false) {
     const btnEliminar  = div.querySelector('.btn-eliminar');
 
     // Editar nombre
+    // IMPORTANTE: nunca tocamos `nombreOriginal` aquí — eso es lo que el
+    // backend usa como llave para encontrar el registro existente en BD
+    // y aplicarle un UPDATE en lugar de un INSERT (que generaría duplicado).
     input.oninput = () => {
         filasOriginales[fila.id].nombre = input.value;
         div.dataset.nombre = input.value;
@@ -258,12 +263,8 @@ function crearFila(fila, formulario, esNueva = false) {
         filasOriginales[fila.id].eliminado   = true;
         filasOriginales[fila.id].verificado  = false;
         filasOriginales[fila.id].confirmado  = false;
-        // Guardamos el nombre original (tal como está en la BD) para que el backend
-        // sepa qué borrar. Si el usuario editó el nombre antes de eliminar,
-        // necesitamos el valor que se cargó originalmente.
-        if (filasOriginales[fila.id].nombreOriginal === undefined) {
-            filasOriginales[fila.id].nombreOriginal = div.dataset.nombre;
-        }
+        // `nombreOriginal` ya se guardó al cargar la fila desde el bootstrap,
+        // así que el backend siempre tiene la clave correcta para el DELETE.
         div.dataset.verificado = 'false';
         div.dataset.confirmado = 'false';
         div.style.display = 'none';
@@ -392,6 +393,7 @@ function agregarEntrada() {
     const fila = {
         id: nuevoId,
         nombre: '',
+        nombreOriginal: '',          // entradas nuevas no tienen nombre original en BD
         poderGobierno: poderActivo,
         confirmado: false,
         verificado: false,
@@ -417,8 +419,10 @@ function agregarEntrada() {
 
 /* =======================
    GUARDAR
-   - Envía registros activos para UPSERT.
+   - Envía registros activos para UPSERT/UPDATE.
    - Envía nombres de registros eliminados para DELETE real en el backend.
+   - Envía `nombreOriginal` para que el backend pueda detectar renombres
+     y hacer UPDATE en lugar de INSERT (evitando duplicados).
    - Aplica normalización NFC + limpieza de espacios para que la unique
      key (estado, nombre) coincida con lo que ya existe en BD.
 ======================= */
@@ -440,7 +444,7 @@ function guardarValidacion() {
         if (fila.eliminado) {
             const esNuevo = String(fila.id).startsWith('nuevo_');
             if (!esNuevo) {
-                // Usar el nombre original con el que se cargó de BD (no el editado),
+                // Usar el nombre con el que se cargó de BD (no el editado),
                 // ya que ese es el que existe como clave en la tabla.
                 const nombreParaBorrar = normalizarNombre(
                     fila.nombreOriginal != null ? fila.nombreOriginal : nombreActual
@@ -453,11 +457,12 @@ function guardarValidacion() {
         if (!nombreActual) return; // ignorar entradas vacías
 
         payload.push({
-            id:            fila.id,
-            nombre:        nombreActual,
-            poderGobierno: fila.poderGobierno,
-            confirmado:    div.dataset.confirmado === 'true' || div.dataset.verificado === 'true',
-            verificado:    div.dataset.verificado === 'true',
+            id:             fila.id,
+            nombre:         nombreActual,
+            nombreOriginal: normalizarNombre(fila.nombreOriginal || ''),  // 👈 clave para detectar renombres
+            poderGobierno:  fila.poderGobierno,
+            confirmado:     div.dataset.confirmado === 'true' || div.dataset.verificado === 'true',
+            verificado:     div.dataset.verificado === 'true',
         });
     });
 
@@ -481,10 +486,9 @@ function guardarValidacion() {
         hayCambiosPendientes = false;
         alert('Información guardada correctamente');
         // Recargar para reflejar el estado real de la BD
-        // (los eliminados ya no aparecerán)
-        if (eliminados.length > 0) {
-            window.location.reload();
-        }
+        // (los eliminados ya no aparecerán y los renombrados tendrán
+        // su `nombreOriginal` actualizado al nombre nuevo)
+        window.location.reload();
     })
     .catch(() => alert('Error al guardar'))
     .finally(() => Loader.hide());

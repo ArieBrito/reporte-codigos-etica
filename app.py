@@ -416,10 +416,14 @@ def descarga_codigos():
 # ==============================================================
 # GUARDAR VALIDACIÓN DE ENTES
 # Estrategia:
-#   - UPSERT por (estado, nombre) para registros activos.
-#   - DELETE explícito para los entes que el usuario marcó como
-#     eliminados en la UI. También se borran sus códigos_etica
-#     asociados para no dejar huérfanos.
+#   1) DELETE explícito para entes que el usuario marcó como eliminados
+#      (incluye sus códigos_etica asociados para no dejar huérfanos).
+#   2) UPDATE para registros existentes cuyo nombre cambió: el frontend
+#      envía `nombreOriginal` y lo usamos como llave WHERE para renombrar
+#      la fila en lugar de insertar un duplicado. También se renombra en
+#      codigos_etica para mantener la referencia por nombre.
+#   3) UPSERT por (estado, nombre) para todo lo demás (registros nuevos
+#      o existentes sin cambio de nombre).
 # ==============================================================
 
 @app.route("/guardar-validacion", methods=["POST"])
@@ -435,22 +439,44 @@ def guardar_validacion():
     filas      = payload.get("filas", [])
     eliminados = payload.get("eliminados", [])
 
-    # ----------------------------------------------------------
+# ----------------------------------------------------------
     # 1. ELIMINACIONES
     # Recibimos los nombres marcados como eliminados en el frontend.
     # Borramos primero el código de ética asociado (si existe) y
     # luego el ente. Esto evita huérfanos en codigos_etica.
+    #
+    # Si CUALQUIER paso falla, abortamos y reportamos al frontend.
+    # No seguimos como si nada — el usuario debe saber que su
+    # eliminación no se aplicó.
     # ----------------------------------------------------------
+    errores_eliminacion = []
+
     for nombre_elim in eliminados:
         nombre_limpio = limpiar(nombre_elim)
         if not nombre_limpio:
             continue
+
+        # Paso 1a: borrar el código de ética asociado (si existe)
         try:
             db.table("codigos_etica") \
                 .delete() \
                 .eq("estado", estado) \
                 .eq("nombre", nombre_limpio) \
                 .execute()
+        except Exception as e:
+            print(f"[ERROR delete codigos_etica '{nombre_limpio}']: {e}")
+            errores_eliminacion.append({
+                "nombre": nombre_limpio,
+                "etapa":  "codigos_etica",
+                "error":  str(e),
+            })
+            # No intentamos borrar el ente: si no pudimos limpiar
+            # el código, dejarías un código huérfano. Mejor abortar
+            # esta eliminación y seguir con la siguiente.
+            continue
+
+        # Paso 1b: borrar el ente
+        try:
             db.table("entes_confirmados") \
                 .delete() \
                 .eq("estado", estado) \
@@ -458,24 +484,93 @@ def guardar_validacion():
                 .execute()
         except Exception as e:
             print(f"[ERROR delete ente '{nombre_limpio}']: {e}")
+            errores_eliminacion.append({
+                "nombre": nombre_limpio,
+                "etapa":  "entes_confirmados",
+                "error":  str(e),
+            })
+
+    # Si hubo errores en eliminaciones, abortamos antes del upsert.
+    # Esto previene un estado mixto donde unos cambios se aplicaron
+    # y otros no.
+    if errores_eliminacion:
+        nombres_fallidos = ", ".join(e["nombre"] for e in errores_eliminacion)
+        return jsonify({
+            "error": (
+                f"No se pudieron eliminar {len(errores_eliminacion)} "
+                f"registro(s): {nombres_fallidos}. "
+                "No se aplicó ningún otro cambio. Intenta de nuevo."
+            ),
+            "detalles": errores_eliminacion,
+        }), 500
 
     # ----------------------------------------------------------
-    # 2. UPSERT de los registros activos
+    # 2. CLASIFICAR FILAS: renombres vs upserts
+    # Un renombre se detecta cuando:
+    #   - el id NO empieza con "nuevo_" (es decir, ya existía en BD), Y
+    #   - hay un nombreOriginal no vacío, Y
+    #   - nombreOriginal != nombre_nuevo
+    # Cualquier otro caso (nuevo, o existente sin cambio) va a upsert.
     # ----------------------------------------------------------
-    registros = []
+    para_upsert = []
+
     for fila in filas:
-        raw_id       = fila.get("id")
-        nombre_nuevo = limpiar(fila.get("nombre", ""))
+        raw_id          = fila.get("id")
+        nombre_nuevo    = limpiar(fila.get("nombre", ""))
+        nombre_original = limpiar(fila.get("nombreOriginal", ""))
+        poder           = limpiar(fila.get("poderGobierno", ""))
+        confirmado      = fila.get("confirmado", False)
+        verificado      = fila.get("verificado", False)
 
         if not nombre_nuevo:
             continue
 
+        es_nuevo = str(raw_id).startswith("nuevo_")
+
+        # --- Caso renombre: UPDATE por nombre_original -----------------
+        if (not es_nuevo) and nombre_original and nombre_original != nombre_nuevo:
+            try:
+                # Renombrar primero en codigos_etica para que la referencia
+                # por nombre siga siendo consistente.
+                # NOTA: si la unique key (estado, nombre) ya tiene un registro
+                # con `nombre_nuevo` en codigos_etica, este UPDATE fallará por
+                # conflicto. Es deseable: significa que el usuario está intentando
+                # renombrar a un nombre que ya existe.
+                db.table("codigos_etica") \
+                    .update({"nombre": nombre_nuevo}) \
+                    .eq("estado", estado) \
+                    .eq("nombre", nombre_original) \
+                    .execute()
+
+                # Renombrar el ente (y de paso actualizar los demás campos).
+                db.table("entes_confirmados") \
+                    .update({
+                        "nombre":         nombre_nuevo,
+                        "poder_gobierno": poder,
+                        "confirmado":     confirmado,
+                        "verificado":     verificado,
+                    }) \
+                    .eq("estado", estado) \
+                    .eq("nombre", nombre_original) \
+                    .execute()
+            except Exception as e:
+                print(f"[ERROR rename '{nombre_original}' → '{nombre_nuevo}']: {e}")
+                return jsonify({
+                    "error": (
+                        f"No se pudo renombrar '{nombre_original}' a "
+                        f"'{nombre_nuevo}'. Posiblemente ya existe otro "
+                        f"registro con ese nombre. Detalle: {str(e)}"
+                    )
+                }), 500
+            continue
+
+        # --- Caso normal: nuevo o sin cambio de nombre → upsert --------
         reg = {
             "estado":         estado,
             "nombre":         nombre_nuevo,
-            "poder_gobierno": limpiar(fila.get("poderGobierno", "")),
-            "confirmado":     fila.get("confirmado", False),
-            "verificado":     fila.get("verificado", False),
+            "poder_gobierno": poder,
+            "confirmado":     confirmado,
+            "verificado":     verificado,
         }
         try:
             reg["institucion_id"] = int(raw_id)
@@ -483,12 +578,15 @@ def guardar_validacion():
         except (ValueError, TypeError):
             reg["es_nueva"]       = True
 
-        registros.append(reg)
+        para_upsert.append(reg)
 
-    if registros:
+    # ----------------------------------------------------------
+    # 3. UPSERT de los registros sin renombre
+    # ----------------------------------------------------------
+    if para_upsert:
         try:
             db.table("entes_confirmados") \
-                .upsert(registros, on_conflict="estado,nombre") \
+                .upsert(para_upsert, on_conflict="estado,nombre") \
                 .execute()
         except Exception as e:
             print(f"[ERROR upsert]: {e}")
