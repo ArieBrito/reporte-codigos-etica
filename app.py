@@ -22,6 +22,8 @@ import httpx
 
 app = Flask(__name__)
 app.secret_key = os.environ.get("FLASK_SECRET_KEY")
+# Permite ñ, acentos, etc. en respuestas JSON sin escaparlos como \uXXXX
+app.config['JSON_AS_ASCII'] = False
 
 CONNECT_TIMEOUT = 3.05
 READ_TIMEOUT    = 10.0
@@ -59,9 +61,40 @@ def usuario_a_email(usuario: str) -> str:
 # ==============================================================
 
 def limpiar(txt):
+    """
+    Limpia y normaliza texto para garantizar consistencia en BD.
+    - Normaliza a NFC (forma canónica compuesta) para que 'é' sea
+      siempre un solo code point, evitando duplicados invisibles
+      cuando el upsert hace match por (estado, nombre).
+    - Reemplaza espacios no-rompibles y otros whitespaces raros por espacio normal.
+    - Colapsa múltiples espacios consecutivos en uno solo.
+    - Elimina caracteres de control invisibles (BOM, zero-width, etc.).
+    """
     if txt is None:
         return ""
-    return txt.strip().replace("\r", "").replace('"', '').replace('\ufeff', '')
+
+    # 1. Asegurar str (por si llega como bytes)
+    if isinstance(txt, bytes):
+        txt = txt.decode("utf-8", errors="replace")
+
+    # 2. Normalización Unicode a NFC — CRÍTICO para acentos y ñ
+    txt = unicodedata.normalize("NFC", txt)
+
+    # 3. Eliminar caracteres invisibles problemáticos
+    #    \ufeff = BOM, \u200b-\u200d = zero-width, \u2060 = word joiner, \r = CR
+    txt = re.sub(r"[\ufeff\u200b-\u200d\u2060\r]", "", txt)
+
+    # 4. Reemplazar espacios "raros" por espacio normal
+    #    \u00a0 = NBSP (típico al pegar de Word), \u2009/\u202f = thin spaces, \t = tab
+    txt = re.sub(r"[\u00a0\u2009\u202f\t]", " ", txt)
+
+    # 5. Quitar comillas dobles (compatibilidad con CSV)
+    txt = txt.replace('"', '')
+
+    # 6. Colapsar múltiples espacios en uno solo
+    txt = re.sub(r"\s+", " ", txt)
+
+    return txt.strip()
 
 def normalizar_texto(txt):
     if not txt:
@@ -318,7 +351,7 @@ def descarga_instituciones():
 
     return Response(
         generar(),
-        mimetype="text/csv",
+        mimetype="text/csv; charset=utf-8",
         headers={"Content-Disposition": f"attachment; filename={filename}"}
     )
 
@@ -375,16 +408,18 @@ def descarga_codigos():
 
     return Response(
         generar(),
-        mimetype="text/csv",
+        mimetype="text/csv; charset=utf-8",
         headers={"Content-Disposition": f"attachment; filename={filename}"}
     )
 
 
 # ==============================================================
 # GUARDAR VALIDACIÓN DE ENTES
-# Estrategia: UPSERT por (estado, nombre) para preservar todos
-# los registros. Ya no se elimina nada. El campo `verificado`
-# indica si el ente está obligado a emitir código de ética.
+# Estrategia:
+#   - UPSERT por (estado, nombre) para registros activos.
+#   - DELETE explícito para los entes que el usuario marcó como
+#     eliminados en la UI. También se borran sus códigos_etica
+#     asociados para no dejar huérfanos.
 # ==============================================================
 
 @app.route("/guardar-validacion", methods=["POST"])
@@ -396,9 +431,38 @@ def guardar_validacion():
     if _proceso_cerrado(db, estado):
         return jsonify({"error": "Proceso cerrado"}), 403
 
-    filas     = request.get_json().get("filas", [])
-    registros = []
+    payload    = request.get_json() or {}
+    filas      = payload.get("filas", [])
+    eliminados = payload.get("eliminados", [])
 
+    # ----------------------------------------------------------
+    # 1. ELIMINACIONES
+    # Recibimos los nombres marcados como eliminados en el frontend.
+    # Borramos primero el código de ética asociado (si existe) y
+    # luego el ente. Esto evita huérfanos en codigos_etica.
+    # ----------------------------------------------------------
+    for nombre_elim in eliminados:
+        nombre_limpio = limpiar(nombre_elim)
+        if not nombre_limpio:
+            continue
+        try:
+            db.table("codigos_etica") \
+                .delete() \
+                .eq("estado", estado) \
+                .eq("nombre", nombre_limpio) \
+                .execute()
+            db.table("entes_confirmados") \
+                .delete() \
+                .eq("estado", estado) \
+                .eq("nombre", nombre_limpio) \
+                .execute()
+        except Exception as e:
+            print(f"[ERROR delete ente '{nombre_limpio}']: {e}")
+
+    # ----------------------------------------------------------
+    # 2. UPSERT de los registros activos
+    # ----------------------------------------------------------
+    registros = []
     for fila in filas:
         raw_id       = fila.get("id")
         nombre_nuevo = limpiar(fila.get("nombre", ""))
@@ -411,7 +475,6 @@ def guardar_validacion():
             "nombre":         nombre_nuevo,
             "poder_gobierno": limpiar(fila.get("poderGobierno", "")),
             "confirmado":     fila.get("confirmado", False),
-            # `verificado` refleja si el ente está obligado a emitir código
             "verificado":     fila.get("verificado", False),
         }
         try:
@@ -423,11 +486,13 @@ def guardar_validacion():
         registros.append(reg)
 
     if registros:
-        # UPSERT: actualiza si ya existe (estado + nombre), inserta si es nuevo.
-        # Nunca elimina registros existentes.
-        db.table("entes_confirmados") \
-            .upsert(registros, on_conflict="estado,nombre") \
-            .execute()
+        try:
+            db.table("entes_confirmados") \
+                .upsert(registros, on_conflict="estado,nombre") \
+                .execute()
+        except Exception as e:
+            print(f"[ERROR upsert]: {e}")
+            return jsonify({"error": f"Error al guardar: {str(e)}"}), 500
 
     invalidar_cache()
     return jsonify({"status": "ok"})
@@ -793,8 +858,10 @@ def enviar_validacion():
 def bootstrap_instituciones():
     """
     Payload inicial para la vista de validación de entes.
-    Copia el catálogo base a entes_confirmados si aún no existe
-    para el estado. Incluye el campo `verificado` en cada ente.
+    Copia el catálogo base a entes_confirmados SOLO la primera vez
+    (cuando entes_confirmados está vacío para el estado).
+    Después de eso, lo que viva en entes_confirmados es la verdad,
+    incluso si el usuario eliminó algunos del catálogo original.
     """
     estado = session["estado"]
     db     = get_supabase_autenticado()
@@ -812,7 +879,7 @@ def bootstrap_instituciones():
         registros_iniciales = [
             {
                 "estado":         estado,
-                "nombre":         r["nombre"],
+                "nombre":         limpiar(r["nombre"]),
                 "poder_gobierno": r["poder_gobierno"],
                 "confirmado":     False,
                 "verificado":     False,
@@ -831,7 +898,7 @@ def bootstrap_instituciones():
 
         instituciones = {
             "fuente": "original",
-            "data": guardados,
+            "data":   guardados,
         }
 
     # Nombres de verificados (para la vista de códigos)
