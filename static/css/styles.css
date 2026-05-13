@@ -912,3 +912,121 @@ tr:hover { background: #fafafa; }
 }
 .btn-guardar-card:hover { background: #1D4ED8; }
 .btn-guardar-card:disabled { opacity: .5; cursor: default; }
+
+/* =====================================================
+   REPOSITORIO DE DOCUMENTOS
+===================================================== */
+
+.documentos-section {
+    background-color: var(--color-bg-soft);
+    text-align: center;
+    padding: 60px 4vw;
+    flex: 1;
+}
+
+.documentos-title {
+    font-size: 28px;
+    margin-bottom: 40px;
+    color: var(--color-text-main);
+}
+
+.documentos-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+    gap: 32px;
+    max-width: 1100px;
+    margin: 0 auto;
+}
+
+.doc-card {
+    background-color: white;
+    padding: 32px 24px 24px;
+    border-radius: 12px;
+    text-decoration: none;
+    color: var(--color-text-secondary);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 18px;
+    box-shadow: var(--shadow-soft);
+    transition: var(--transition-medium);
+    border: 1px solid transparent;
+}
+
+.doc-card:hover,
+.doc-card:focus-visible {
+    transform: translateY(-6px);
+    box-shadow: var(--shadow-medium);
+    border-color: var(--color-primary);
+    outline: none;
+}
+
+.doc-card-icon {
+    width: 100px;
+    height: 120px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.doc-card-icon img {
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+}
+
+.doc-card-nombre {
+    font-family: var(--font-body);
+    font-size: 16px;
+    line-height: 1.4;
+    color: var(--color-text-main);
+    margin: 0;
+    min-height: 3em;            /* mantiene tarjetas alineadas con textos largos/cortos */
+    display: flex;
+    align-items: center;
+    text-align: center;
+}
+
+.doc-card-accion {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--color-primary);
+    padding: 8px 14px;
+    border: 1px solid var(--color-primary);
+    border-radius: 999px;
+    transition: var(--transition-fast);
+}
+
+.doc-card-accion img {
+    width: 14px;
+    height: 14px;
+}
+
+.doc-card:hover .doc-card-accion,
+.doc-card:focus-visible .doc-card-accion {
+    background-color: var(--color-primary);
+    color: white;
+}
+
+.doc-card:hover .doc-card-accion img,
+.doc-card:focus-visible .doc-card-accion img {
+    filter: brightness(0) invert(1);
+}
+
+.doc-empty {
+    grid-column: 1 / -1;
+    font-size: 16px;
+    color: var(--color-text-muted);
+    padding: 40px 0;
+}
+
+/* Responsive: en móvil queda en una sola columna con padding más cómodo */
+@media (max-width: 600px) {
+    .documentos-section { padding: 40px 5vw; }
+    .documentos-grid    { gap: 20px; }
+    .doc-card           { padding: 24px 18px; }
+    .doc-card-icon      { width: 80px; height: 100px; }
+}
