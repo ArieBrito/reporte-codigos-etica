@@ -424,6 +424,15 @@ def descarga_codigos():
 #      codigos_etica para mantener la referencia por nombre.
 #   3) UPSERT por (estado, nombre) para todo lo demás (registros nuevos
 #      o existentes sin cambio de nombre).
+#
+# Defensas contra el error Postgres 21000:
+#   "ON CONFLICT DO UPDATE command cannot affect row a second time"
+#
+#   a) Deduplicación del array antes del upsert: si el payload trae dos
+#      filas con el mismo (estado, nombre), nos quedamos con la última.
+#   b) Validación previa en renombres y upserts: si el nombre destino
+#      ya existe como OTRO registro (no el que se está editando), se
+#      reporta al usuario en vez de dejar que Postgres aborte.
 # ==============================================================
 
 @app.route("/guardar-validacion", methods=["POST"])
@@ -439,15 +448,11 @@ def guardar_validacion():
     filas      = payload.get("filas", [])
     eliminados = payload.get("eliminados", [])
 
-# ----------------------------------------------------------
+    # ----------------------------------------------------------
     # 1. ELIMINACIONES
     # Recibimos los nombres marcados como eliminados en el frontend.
     # Borramos primero el código de ética asociado (si existe) y
     # luego el ente. Esto evita huérfanos en codigos_etica.
-    #
-    # Si CUALQUIER paso falla, abortamos y reportamos al frontend.
-    # No seguimos como si nada — el usuario debe saber que su
-    # eliminación no se aplicó.
     # ----------------------------------------------------------
     errores_eliminacion = []
 
@@ -470,9 +475,6 @@ def guardar_validacion():
                 "etapa":  "codigos_etica",
                 "error":  str(e),
             })
-            # No intentamos borrar el ente: si no pudimos limpiar
-            # el código, dejarías un código huérfano. Mejor abortar
-            # esta eliminación y seguir con la siguiente.
             continue
 
         # Paso 1b: borrar el ente
@@ -490,9 +492,6 @@ def guardar_validacion():
                 "error":  str(e),
             })
 
-    # Si hubo errores en eliminaciones, abortamos antes del upsert.
-    # Esto previene un estado mixto donde unos cambios se aplicaron
-    # y otros no.
     if errores_eliminacion:
         nombres_fallidos = ", ".join(e["nombre"] for e in errores_eliminacion)
         return jsonify({
@@ -505,14 +504,40 @@ def guardar_validacion():
         }), 500
 
     # ----------------------------------------------------------
-    # 2. CLASIFICAR FILAS: renombres vs upserts
-    # Un renombre se detecta cuando:
-    #   - el id NO empieza con "nuevo_" (es decir, ya existía en BD), Y
-    #   - hay un nombreOriginal no vacío, Y
-    #   - nombreOriginal != nombre_nuevo
-    # Cualquier otro caso (nuevo, o existente sin cambio) va a upsert.
+    # 2. DETECCIÓN DE DUPLICADOS EN EL PAYLOAD
+    # Antes de tocar BD, revisamos si el usuario mandó dos o más
+    # filas con el mismo nombre (después de normalizar). Esto causa
+    # el error 21000 si no se controla.
+    # ----------------------------------------------------------
+    nombres_en_payload = {}   # nombre_limpio -> [posiciones en filas]
+
+    for i, fila in enumerate(filas):
+        nombre_limpio = limpiar(fila.get("nombre", ""))
+        if not nombre_limpio:
+            continue
+        nombres_en_payload.setdefault(nombre_limpio, []).append(i)
+
+    duplicados_en_payload = {
+        n: posiciones
+        for n, posiciones in nombres_en_payload.items()
+        if len(posiciones) > 1
+    }
+
+    if duplicados_en_payload:
+        nombres_dup = ", ".join(f"'{n}'" for n in duplicados_en_payload.keys())
+        return jsonify({
+            "error": (
+                f"Hay registros duplicados en la lista: {nombres_dup}. "
+                "Cada institución debe tener un nombre único. "
+                "Elimina o renombra los duplicados antes de guardar."
+            )
+        }), 400
+
+    # ----------------------------------------------------------
+    # 3. CLASIFICAR FILAS: renombres vs upserts
     # ----------------------------------------------------------
     para_upsert = []
+    renombres   = []   # se procesan primero porque mutan BD
 
     for fila in filas:
         raw_id          = fila.get("id")
@@ -529,39 +554,13 @@ def guardar_validacion():
 
         # --- Caso renombre: UPDATE por nombre_original -----------------
         if (not es_nuevo) and nombre_original and nombre_original != nombre_nuevo:
-            try:
-                # Renombrar primero en codigos_etica para que la referencia
-                # por nombre siga siendo consistente.
-                # NOTA: si la unique key (estado, nombre) ya tiene un registro
-                # con `nombre_nuevo` en codigos_etica, este UPDATE fallará por
-                # conflicto. Es deseable: significa que el usuario está intentando
-                # renombrar a un nombre que ya existe.
-                db.table("codigos_etica") \
-                    .update({"nombre": nombre_nuevo}) \
-                    .eq("estado", estado) \
-                    .eq("nombre", nombre_original) \
-                    .execute()
-
-                # Renombrar el ente (y de paso actualizar los demás campos).
-                db.table("entes_confirmados") \
-                    .update({
-                        "nombre":         nombre_nuevo,
-                        "poder_gobierno": poder,
-                        "confirmado":     confirmado,
-                        "verificado":     verificado,
-                    }) \
-                    .eq("estado", estado) \
-                    .eq("nombre", nombre_original) \
-                    .execute()
-            except Exception as e:
-                print(f"[ERROR rename '{nombre_original}' → '{nombre_nuevo}']: {e}")
-                return jsonify({
-                    "error": (
-                        f"No se pudo renombrar '{nombre_original}' a "
-                        f"'{nombre_nuevo}'. Posiblemente ya existe otro "
-                        f"registro con ese nombre. Detalle: {str(e)}"
-                    )
-                }), 500
+            renombres.append({
+                "nombre_original": nombre_original,
+                "nombre_nuevo":    nombre_nuevo,
+                "poder":           poder,
+                "confirmado":      confirmado,
+                "verificado":      verificado,
+            })
             continue
 
         # --- Caso normal: nuevo o sin cambio de nombre → upsert --------
@@ -581,7 +580,95 @@ def guardar_validacion():
         para_upsert.append(reg)
 
     # ----------------------------------------------------------
-    # 3. UPSERT de los registros sin renombre
+    # 4. APLICAR RENOMBRES
+    # Antes de cada UPDATE, verificamos que el nombre destino no
+    # esté ya ocupado por OTRO registro del mismo estado.
+    # ----------------------------------------------------------
+    for r in renombres:
+        nombre_original = r["nombre_original"]
+        nombre_nuevo    = r["nombre_nuevo"]
+
+        # ¿Existe ya OTRO ente con el nombre nuevo?
+        # (excluyendo el propio registro que se está renombrando)
+        try:
+            choque = db.table("entes_confirmados") \
+                .select("nombre") \
+                .eq("estado", estado) \
+                .eq("nombre", nombre_nuevo) \
+                .execute()
+        except Exception as e:
+            print(f"[ERROR check rename '{nombre_nuevo}']: {e}")
+            return jsonify({
+                "error": f"Error al validar el renombre de '{nombre_original}'."
+            }), 500
+
+        if choque.data:
+            return jsonify({
+                "error": (
+                    f"No se puede renombrar '{nombre_original}' a "
+                    f"'{nombre_nuevo}': ya existe otra institución con ese "
+                    "nombre en el estado. Usa un nombre distinto o elimina "
+                    "el duplicado existente."
+                )
+            }), 400
+
+        # Renombrar en codigos_etica primero (para mantener la referencia
+        # por nombre cuando se borre/refresque).
+        try:
+            db.table("codigos_etica") \
+                .update({"nombre": nombre_nuevo}) \
+                .eq("estado", estado) \
+                .eq("nombre", nombre_original) \
+                .execute()
+        except Exception as e:
+            print(f"[ERROR rename codigos_etica '{nombre_original}' → '{nombre_nuevo}']: {e}")
+            return jsonify({
+                "error": (
+                    f"No se pudo actualizar el código de ética asociado a "
+                    f"'{nombre_original}'. Detalle: {str(e)}"
+                )
+            }), 500
+
+        # Renombrar el ente y actualizar sus demás campos.
+        try:
+            db.table("entes_confirmados") \
+                .update({
+                    "nombre":         nombre_nuevo,
+                    "poder_gobierno": r["poder"],
+                    "confirmado":     r["confirmado"],
+                    "verificado":     r["verificado"],
+                }) \
+                .eq("estado", estado) \
+                .eq("nombre", nombre_original) \
+                .execute()
+        except Exception as e:
+            print(f"[ERROR rename ente '{nombre_original}' → '{nombre_nuevo}']: {e}")
+            return jsonify({
+                "error": (
+                    f"No se pudo renombrar '{nombre_original}' a "
+                    f"'{nombre_nuevo}'. Detalle: {str(e)}"
+                )
+            }), 500
+
+    # ----------------------------------------------------------
+    # 5. DEDUPLICACIÓN DE SEGURIDAD ANTES DEL UPSERT
+    #
+    # Aunque el paso 2 ya rechazó payloads con duplicados visibles,
+    # blindamos contra cualquier caso de borde: si por alguna razón
+    # quedaran dos entradas con la misma (estado, nombre) en
+    # `para_upsert`, nos quedamos con la última.
+    #
+    # Esto previene definitivamente el error Postgres 21000:
+    # "ON CONFLICT DO UPDATE command cannot affect row a second time"
+    # ----------------------------------------------------------
+    vistos = {}
+    for reg in para_upsert:
+        clave = (reg["estado"], reg["nombre"])
+        vistos[clave] = reg
+    para_upsert = list(vistos.values())
+
+    # ----------------------------------------------------------
+    # 6. UPSERT de los registros sin renombre
     # ----------------------------------------------------------
     if para_upsert:
         try:
@@ -589,8 +676,22 @@ def guardar_validacion():
                 .upsert(para_upsert, on_conflict="estado,nombre") \
                 .execute()
         except Exception as e:
-            print(f"[ERROR upsert]: {e}")
-            return jsonify({"error": f"Error al guardar: {str(e)}"}), 500
+            mensaje = str(e)
+            print(f"[ERROR upsert]: {mensaje}")
+
+            # Mensaje amigable si llegáramos a caer en 21000 a pesar
+            # de las defensas anteriores (no debería ocurrir, pero
+            # garantiza que el usuario nunca vea el error técnico crudo).
+            if "21000" in mensaje or "second time" in mensaje:
+                return jsonify({
+                    "error": (
+                        "Se detectaron nombres duplicados al guardar. "
+                        "Revisa la lista, asegúrate de que cada institución "
+                        "tenga un nombre único y vuelve a intentarlo."
+                    )
+                }), 400
+
+            return jsonify({"error": f"Error al guardar: {mensaje}"}), 500
 
     invalidar_cache()
     return jsonify({"status": "ok"})
