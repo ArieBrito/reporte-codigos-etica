@@ -78,6 +78,7 @@ const sb = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 // ESTADO GLOBAL
 // ======================================================
 let grafico = null;
+let datosGlobales = null;   // último payload de /api/resultados, usado por descargarCSV()
 
 // ======================================================
 // RENDERIZADO
@@ -167,9 +168,9 @@ function renderizarTabla(datos) {
                         ${detalle.map(inst => `
                             <tr>
                                 <td>${inst.nombre}</td>
-                                <td>${inst.cuenta || '—'}</td>
+                                <td>${(inst.cuenta_codigo || inst.cuenta) || '—'}</td>
                                 <td>${inst.link ? '<a href="' + inst.link + '" target="_blank">Ver enlace</a>' : '—'}</td>
-                                <td>${inst.fecha || '—'}</td>
+                                <td>${(inst.fecha_publicacion || inst.fecha) || '—'}</td>
                             </tr>
                         `).join('')}
                     </tbody>
@@ -261,63 +262,73 @@ function toggleDetalle(idEstado) {
 }
 
 async function actualizarDashboard(datos) {
+    datosGlobales = datos;                  // guardar para descarga CSV
     renderizarMetricas(datos);
     renderizarGrafico(datos);
     renderizarTabla(datos);
     await renderizarMapa(datos);
 }
 
+// ======================================================
+// DESCARGA CSV
+// Construye el CSV directamente desde los datos del API
+// (no del DOM), con las columnas reales de la tabla
+// codigos_etica:
+//   estado, nombre, cuenta_codigo, link, fecha_publicacion,
+//   cumple_lineamientos, num_instituciones
+// ======================================================
 function descargarCSV() {
-    // Obtener datos del DOM ya renderizado
-    const filas = [];
+    if (!datosGlobales) {
+        alert("Los datos aún no se han cargado. Intenta de nuevo en unos segundos.");
+        return;
+    }
 
-    // Encabezados completos
-    filas.push([
-        "Entidad",
-        "Instituciones emisoras",
-        "Códigos con liga registrada",
-        "Instituciones destinatarias",
-        "Institución",
-        "¿Cuenta con código?",
-        "Liga",
-        "Fecha de publicación"
-    ].map(h => `"${h}"`).join(","));
+    const encabezados = [
+        "estado",
+        "nombre",
+        "cuenta_codigo",
+        "link",
+        "fecha_publicacion",
+        "cumple_lineamientos",
+        "num_instituciones"
+    ];
 
-    const tabla = document.getElementById("tablaEstados");
-    const filasPrincipales = tabla.querySelectorAll("tr.fila-estado");
+    // Envuelve un valor como campo CSV: comillas dobles y escape de comillas internas.
+    const escapar = v => {
+        if (v === null || v === undefined) return '""';
+        return `"${String(v).replace(/"/g, '""')}"`;
+    };
 
-    filasPrincipales.forEach(trEstado => {
-        const celdas      = trEstado.querySelectorAll("td");
-        const entidad     = celdas[1]?.innerText.trim() || "";
-        const emisoras    = celdas[2]?.innerText.trim() || "";
-        const conLink     = celdas[3]?.innerText.trim() || "";
-        const destinat    = celdas[4]?.innerText.trim() || "";
+    const filas = [encabezados.map(h => `"${h}"`).join(",")];
 
-        // Buscar la fila de detalle correspondiente
-        const idEstado    = entidad.replace(/\s+/g, "_");
-        const trDetalle   = document.getElementById(`detalle_${idEstado}`);
-        const instRows    = trDetalle
-            ? trDetalle.querySelectorAll("table.tabla-detalle tbody tr")
-            : [];
+    datosGlobales.estados.forEach(e => {
+        const detalle = e.detalle || [];
 
-        if (instRows.length === 0) {
-            // Entidad sin detalle cargado aún
-            filas.push([entidad, emisoras, conLink, destinat, "", "", "", ""]
-                .map(v => `"${v.replace(/"/g, '""')}"`).join(","));
-        } else {
-            // Una fila por institución, repitiendo datos de la entidad
-            instRows.forEach(trInst => {
-                const cols = trInst.querySelectorAll("td");
-                const nombre  = cols[0]?.innerText.trim() || "";
-                const cuenta  = cols[1]?.innerText.trim() || "";
-                const ligaEl = cols[2]?.querySelector("a");
-                const liga   = ligaEl ? ligaEl.getAttribute("href") : (cols[2]?.innerText.trim() === "—" ? "" : cols[2]?.innerText.trim());
-                const fecha   = cols[3]?.innerText.trim() || "";
-
-                filas.push([entidad, emisoras, conLink, destinat, nombre, cuenta, liga, fecha]
-                    .map(v => `"${v.replace(/"/g, '""')}"`).join(","));
-            });
+        if (detalle.length === 0) {
+            // Entidad sin instituciones registradas: emitimos una fila con
+            // solo el estado para que quede constancia en el CSV.
+            filas.push([e.entidad, "", "", "", "", "", ""].map(escapar).join(","));
+            return;
         }
+
+        detalle.forEach(inst => {
+            // Compatibilidad: si el backend aún manda los alias viejos
+            // (cuenta, fecha), los aceptamos como fallback.
+            const cuentaCodigo       = inst.cuenta_codigo       ?? inst.cuenta ?? "";
+            const fechaPublicacion   = inst.fecha_publicacion   ?? inst.fecha  ?? "";
+            const cumpleLineamientos = inst.cumple_lineamientos ?? "";
+            const numInstituciones   = inst.num_instituciones   ?? "";
+
+            filas.push([
+                e.entidad,
+                inst.nombre ?? "",
+                cuentaCodigo,
+                inst.link ?? "",
+                fechaPublicacion,
+                cumpleLineamientos,
+                numInstituciones
+            ].map(escapar).join(","));
+        });
     });
 
     const blob = new Blob(["\uFEFF" + filas.join("\n")], {

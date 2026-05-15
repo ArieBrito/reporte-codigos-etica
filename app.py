@@ -251,16 +251,19 @@ def api_resultados():
     anios   = db.table("vista_anios").select("*").execute().data or []
 
     detalle = db.table("codigos_etica") \
-        .select("estado, nombre, cuenta_codigo, link, fecha_publicacion") \
+        .select("estado, nombre, cuenta_codigo, link, fecha_publicacion, cumple_lineamientos, num_instituciones") \
         .execute().data or []
 
     detalle_map = {}
     for d in detalle:
         detalle_map.setdefault(d["estado"], []).append({
-            "nombre": d["nombre"],
-            "cuenta": d["cuenta_codigo"],
-            "link":   d["link"],
-            "fecha":  d["fecha_publicacion"]
+            "estado":              d["estado"],
+            "nombre":              d["nombre"],
+            "cuenta_codigo":       d["cuenta_codigo"],
+            "link":                d["link"],
+            "fecha_publicacion":   d["fecha_publicacion"],
+            "cumple_lineamientos": d["cumple_lineamientos"],
+            "num_instituciones":   d["num_instituciones"],
         })
 
     estados = [
