@@ -582,7 +582,11 @@ function guardarCard(card, btnGuardar) {
         headers: { 'Content-Type': 'application/json' },
         body:    JSON.stringify(payload)
     })
-    .then(r => r.json())
+    .then(async r => {
+        const data = await r.json().catch(() => ({}));
+        if (!r.ok) throw new Error(data.error || `Error ${r.status}`);
+        return data;
+    })
     .then(() => {
         card.dataset.editando = "false";
         card.querySelectorAll('input').forEach(i => i.disabled = true);
@@ -590,9 +594,9 @@ function guardarCard(card, btnGuardar) {
         btnGuardar.disabled = true;
         alert(`✓ "${nombreOriginal}" guardada correctamente.`);
     })
-    .catch(() => {
+    .catch(err => {
         btnGuardar.disabled = false;
-        alert('No se pudo guardar la información.');
+        alert(`No se pudo guardar: ${err.message}`);
     })
     .finally(() => Loader.hide());
 }
@@ -648,7 +652,11 @@ function guardarTodo() {
         headers: { 'Content-Type': 'application/json' },
         body:    JSON.stringify(payload)
     })
-    .then(r => r.json())
+    .then(async r => {
+        const data = await r.json().catch(() => ({}));
+        if (!r.ok) throw new Error(data.error || `Error ${r.status}`);
+        return data;
+    })
     .then(() => {
         alert('Información guardada correctamente');
         cards.forEach(card => {
@@ -658,7 +666,7 @@ function guardarTodo() {
             card.querySelector('.btn-guardar-card').disabled = true;
         });
     })
-    .catch(() => alert('No se pudo guardar la información'))
+    .catch(err => alert(`No se pudo guardar la información: ${err.message}`))
     .finally(() => Loader.hide());
 }
 

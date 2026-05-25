@@ -257,13 +257,15 @@ def api_resultados():
     detalle_map = {}
     for d in detalle:
         detalle_map.setdefault(d["estado"], []).append({
-            "estado":              d["estado"],
             "nombre":              d["nombre"],
             "cuenta_codigo":       d["cuenta_codigo"],
             "link":                d["link"],
             "fecha_publicacion":   d["fecha_publicacion"],
             "cumple_lineamientos": d["cumple_lineamientos"],
             "num_instituciones":   d["num_instituciones"],
+            # alias para compatibilidad con código viejo que lee 'cuenta' y 'fecha':
+            "cuenta":              d["cuenta_codigo"],
+            "fecha":               d["fecha_publicacion"],
         })
 
     estados = [
@@ -752,6 +754,7 @@ def validar_codigos():
 @app.route("/guardar-validacion-codigos", methods=["POST"])
 @login_required
 def guardar_validacion_codigos():
+    import traceback
     try:
         estado = session["estado"]
         db     = get_supabase_autenticado()
@@ -759,31 +762,77 @@ def guardar_validacion_codigos():
         if _proceso_cerrado(db, estado):
             return jsonify({"error": "Proceso cerrado"}), 403
 
-        registros = []
-        for fila in request.get_json():
+        body = request.get_json() or []
+
+        # Construir registros + deduplicar por (estado, nombre).
+        # Si el payload trae dos filas con el mismo nombre tras limpiar(),
+        # nos quedamos con la última (la más reciente edición).
+        vistos = {}
+        duplicados_detectados = []
+
+        for fila in body:
+            nombre = limpiar(fila.get("nombre"))
+            if not nombre:
+                continue
+
             num = fila.get("num_instituciones")
             try:
                 num = int(num) if num not in (None, "") else 0
             except (ValueError, TypeError):
                 num = 0
 
-            registros.append({
+            reg = {
                 "estado":              estado,
-                "nombre":              limpiar(fila.get("nombre")),
+                "nombre":              nombre,
                 "cuenta_codigo":       limpiar(fila.get("cuenta_codigo")),
                 "link":                limpiar(fila.get("link")),
                 "fecha_publicacion":   limpiar(fila.get("fecha_publicacion")) or None,
                 "cumple_lineamientos": limpiar(fila.get("cumple_lineamientos")),
                 "num_instituciones":   num,
-            })
+            }
 
-        db.table("codigos_etica").delete().eq("estado", estado).execute()
+            clave = (estado, nombre)
+            if clave in vistos:
+                duplicados_detectados.append(nombre)
+            vistos[clave] = reg
 
-        if registros:
-            db.table("codigos_etica").insert(registros).execute()
+        registros = list(vistos.values())
+
+        if duplicados_detectados:
+            print(f"[WARN guardar-codigos] Duplicados colapsados tras limpiar(): "
+                  f"{duplicados_detectados}")
+
+        if not registros:
+            return jsonify({"status": "ok", "guardados": 0})
+
+        # UPSERT atómico por (estado, nombre).
+        # Esto reemplaza el DELETE+INSERT y evita ventanas donde
+        # se pierdan datos si el INSERT falla.
+        try:
+            resp = supabase_admin.table("codigos_etica") \
+                .upsert(registros, on_conflict="estado,nombre") \
+                .execute()
+        except Exception as e:
+            print(f"[ERROR upsert codigos_etica]: {e}")
+            print(traceback.format_exc())
+            return jsonify({
+                "error": f"Error al guardar en base de datos: {str(e)}"
+            }), 500
+
+        guardados = len(resp.data or [])
+        print(f"[guardar-codigos] estado={estado} guardados={guardados}/{len(registros)}")
+
+        if guardados == 0:
+            return jsonify({
+                "error": "El servidor aceptó la petición pero no se guardó ningún registro."
+            }), 500
 
         invalidar_cache()
-        return jsonify({"status": "ok"})
+        return jsonify({
+            "status":     "ok",
+            "guardados":  guardados,
+            "duplicados": duplicados_detectados,  # informativo, no es error
+        })
 
     except Exception as e:
         import traceback

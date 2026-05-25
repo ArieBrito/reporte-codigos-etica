@@ -160,19 +160,32 @@ function renderizarTabla(datos) {
                     <thead><tr>
                         <th>Institución</th>
                         <th>¿Cuenta con código?</th>
-                        <th>Liga</th>
+                        <th>Enlace</th>
                         <th>Fecha de publicación</th>
-                        <th></th>
+                        <th>Instituciones destinatarias</th>
                     </tr></thead>
                     <tbody>
-                        ${detalle.map(inst => `
-                            <tr>
-                                <td>${inst.nombre}</td>
-                                <td>${(inst.cuenta_codigo || inst.cuenta) || '—'}</td>
-                                <td>${inst.link ? '<a href="' + inst.link + '" target="_blank">Ver enlace</a>' : '—'}</td>
-                                <td>${(inst.fecha_publicacion || inst.fecha) || '—'}</td>
-                            </tr>
-                        `).join('')}
+                        ${detalle.map(inst => {
+                            const cuenta = (inst.cuenta_codigo || inst.cuenta) || '—';
+                            const fecha  = (inst.fecha_publicacion || inst.fecha) || '—';
+                            const num    = (inst.num_instituciones !== null
+                                            && inst.num_instituciones !== undefined
+                                            && inst.num_instituciones !== '')
+                                            ? inst.num_instituciones
+                                            : '—';
+                            const link   = inst.link
+                                            ? `<a href="${inst.link}" target="_blank">Ver enlace</a>`
+                                            : '—';
+                            return `
+                                <tr>
+                                    <td>${inst.nombre}</td>
+                                    <td>${cuenta}</td>
+                                    <td>${link}</td>
+                                    <td>${fecha}</td>
+                                    <td>${num}</td>
+                                </tr>
+                            `;
+                        }).join('')}
                     </tbody>
                 </table>
             </td>
