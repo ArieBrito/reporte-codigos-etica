@@ -49,7 +49,9 @@ const Loader = {
             <span class="estado-label">{{ estado }}</span>
             <a href="{{ url_for('home') }}" class="btn-login secondary">Inicio</a>
             <a href="{{ url_for('menu') }}" class="btn-login secondary">Menú</a>
+            {% if request.endpoint in ('validar_codigos', 'validar_instituciones') %}
             <a href="{{ url_for('documentos') }}" class="btn-login secondary">Documentos</a>
+            {% endif %}
             <a href="{{ url_for('logout') }}" class="btn-login secondary">Cerrar sesión</a>
         {% endif %}
     </div>
