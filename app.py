@@ -1240,6 +1240,101 @@ def readyz():
 
 
 # ==============================================================
+# REPOSITORIO DE DOCUMENTOS DESCARGABLES
+# ==============================================================
+#
+# Bucket de Supabase Storage donde viven los archivos del repositorio.
+# Es PRIVADO por diseño: nunca se exponen URLs directas al cliente.
+# Toda descarga pasa por /documentos/descargar/<slug>, que valida sesión
+# y hace stream del binario al navegador.
+
+REPOSITORIO_BUCKET = "repositorio"
+
+# Catálogo de documentos disponibles.
+#
+# Para agregar un nuevo documento en el futuro basta con:
+#   1. Subirlo al bucket `repositorio` en Supabase Storage.
+#   2. Agregar una entrada nueva a esta lista.
+#
+# Campos:
+#   slug             -> identificador URL-safe usado en la ruta de descarga.
+#   nombre           -> texto visible en la tarjeta.
+#   archivo          -> nombre exacto del objeto en el bucket.
+#   nombre_descarga  -> nombre con el que se descargará en el navegador.
+DOCUMENTOS_REPOSITORIO = [
+    {
+        "slug":            "lgra",
+        "nombre":          "Ley General de Responsabilidades Administrativas",
+        "archivo":         "LGRA.pdf",
+        "nombre_descarga": "Ley_General_Responsabilidades_Administrativas.pdf",
+    },
+    {
+        "slug":            "lineamientos-codigo-etica",
+        "nombre":          "Acuerdo por el que se dan a conocer los lineamientos para la emisión del Código de Ética",
+        "archivo":         "Lineamientos.pdf",
+        "nombre_descarga": "Lineamientos_Codigo_Etica.pdf",
+    },
+    {
+        "slug":            "manual-usuario",
+        "nombre":          "Manual de Usuario",
+        "archivo":         "usuario.pdf",
+        "nombre_descarga": "Manual_de_Usuario.pdf",
+    },
+]
+
+# Índice por slug para lookup O(1) en la ruta de descarga.
+_DOCS_POR_SLUG = {d["slug"]: d for d in DOCUMENTOS_REPOSITORIO}
+
+
+@app.route("/documentos")
+@login_required
+def documentos():
+    """
+    Vista del repositorio de documentos.
+    Solo lista metadatos — los archivos NO se exponen aquí.
+    """
+    return render_template(
+        "documentos.html",
+        usuario     = session.get("usuario"),
+        estado      = session.get("estado"),
+        documentos  = DOCUMENTOS_REPOSITORIO,
+    )
+
+
+@app.route("/documentos/descargar/<slug>")
+@login_required
+def descargar_documento(slug):
+    """
+    Streamea un documento del bucket privado `repositorio` al usuario.
+    - Valida sesión vía @login_required.
+    - Valida que el slug exista en el catálogo (whitelist; previene
+      path-traversal o intentos de descargar archivos arbitrarios).
+    - Descarga el binario desde Supabase Storage con el SERVICE KEY
+      (el bucket es privado, no se generan URLs públicas).
+    """
+    doc = _DOCS_POR_SLUG.get(slug)
+    if not doc:
+        return jsonify({"error": "Documento no encontrado"}), 404
+
+    try:
+        contenido = supabase_admin.storage \
+            .from_(REPOSITORIO_BUCKET) \
+            .download(doc["archivo"])
+    except Exception as e:
+        app.logger.exception("Error descargando %s: %s", doc["archivo"], e)
+        return jsonify({"error": "No se pudo recuperar el documento"}), 502
+
+    return Response(
+        contenido,
+        mimetype="application/pdf",
+        headers={
+            "Content-Disposition": f'attachment; filename="{doc["nombre_descarga"]}"',
+            "Cache-Control":       "private, no-store",
+        },
+    )
+
+
+# ==============================================================
 # ARRANQUE
 # ==============================================================
 

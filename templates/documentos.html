@@ -1,0 +1,37 @@
+{% extends "base.html" %}
+
+{% block title %}Documentos{% endblock %}
+
+{% block content %}
+
+<section class="documentos-section">
+
+    <h3 class="documentos-title">Documentos</h3>
+
+    <div class="documentos-grid">
+        {% for doc in documentos %}
+            <a class="doc-card"
+               href="{{ url_for('descargar_documento', slug=doc.slug) }}"
+               aria-label="Descargar {{ doc.nombre }}">
+
+                <div class="doc-card-icon">
+                    <img src="{{ url_for('static', filename='assets/icons/pdf_icon.svg') }}"
+                         alt="Archivo PDF">
+                </div>
+
+                <p class="doc-card-nombre">{{ doc.nombre }}</p>
+
+                <span class="doc-card-accion">
+                    Descargar
+                    <img src="{{ url_for('static', filename='assets/icons/link.svg') }}"
+                         alt="" aria-hidden="true">
+                </span>
+            </a>
+        {% else %}
+            <p class="doc-empty">No hay documentos disponibles por el momento.</p>
+        {% endfor %}
+    </div>
+
+</section>
+
+{% endblock %}
