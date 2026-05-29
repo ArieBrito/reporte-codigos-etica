@@ -1276,9 +1276,9 @@ DOCUMENTOS_REPOSITORIO = [
     },
     {
         "slug":            "manual-usuario",
-        "nombre":          "Manual de Usuario",
+        "nombre":          "Manual para personas usuarias",
         "archivo":         "usuario.pdf",
-        "nombre_descarga": "Manual_de_Usuario.pdf",
+        "nombre_descarga": "Manual_para_personas_usuarias.pdf",
     },
 ]
 
@@ -1291,7 +1291,6 @@ _DOCS_POR_SLUG = {d["slug"]: d for d in DOCUMENTOS_REPOSITORIO}
 def documentos():
     """
     Vista del repositorio de documentos.
-    Solo lista metadatos — los archivos NO se exponen aquí.
     """
     return render_template(
         "documentos.html",
