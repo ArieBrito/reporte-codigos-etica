@@ -438,18 +438,13 @@ function guardarValidacion() {
         // Normalizar SIEMPRE antes de enviar
         const nombreActual = normalizarNombre(div.querySelector('input').value);
 
-        // Caso eliminado: se manda al endpoint de borrado.
-        // Solo tiene sentido borrar registros que vivieron en BD;
-        // los que son nuevos y se eliminaron antes de guardar se ignoran.
         if (fila.eliminado) {
             const esNuevo = String(fila.id).startsWith('nuevo_');
             if (!esNuevo) {
-                // Usar el nombre con el que se cargó de BD (no el editado),
-                // ya que ese es el que existe como clave en la tabla.
-                const nombreParaBorrar = normalizarNombre(
-                    fila.nombreOriginal != null ? fila.nombreOriginal : nombreActual
-                );
-                if (nombreParaBorrar) eliminados.push(nombreParaBorrar);
+                // Borrar por ID (clave primaria = UUID), no por nombre.
+                // El id es texto (UUID), NO un entero: se envía tal cual.
+                const idStr = String(fila.id).trim();
+                if (idStr) eliminados.push(idStr);
             }
             return; // No incluir en upsert
         }

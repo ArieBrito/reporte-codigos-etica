@@ -461,48 +461,69 @@ def guardar_validacion():
     # ----------------------------------------------------------
     errores_eliminacion = []
 
-    for nombre_elim in eliminados:
-        nombre_limpio = limpiar(nombre_elim)
-        if not nombre_limpio:
+    for id_elim in eliminados:
+        # `eliminados` trae IDs (clave primaria = UUID), no nombres.
+        # El id es texto (UUID): se usa tal cual, sin convertir a int.
+        ente_id = str(id_elim).strip()
+        if not ente_id or ente_id.startswith("nuevo_"):
+            continue  # entradas nuevas / ids vacíos: ignorar
+
+        # Paso 1a: leer el nombre REAL almacenado, para borrar el código
+        # de ética asociado (que se enlaza por nombre, no por id).
+        try:
+            res = db.table("entes_confirmados") \
+                .select("nombre") \
+                .eq("estado", estado) \
+                .eq("id", ente_id) \
+                .limit(1) \
+                .execute()
+        except Exception as e:
+            print(f"[ERROR lookup ente id={ente_id}]: {e}")
+            errores_eliminacion.append({
+                "id": ente_id, "etapa": "lookup", "error": str(e),
+            })
             continue
 
-        # Paso 1a: borrar el código de ética asociado (si existe)
+        if not res.data:
+            # La fila ya no existe (p.ej. otro proceso la borró). No es error.
+            continue
+
+        nombre_bd = res.data[0]["nombre"]  # nombre crudo, tal cual en BD
+
+        # Paso 1b: borrar el código de ética usando el nombre REAL (sin
+        # normalizar), que es como está guardado en codigos_etica.
         try:
             db.table("codigos_etica") \
                 .delete() \
                 .eq("estado", estado) \
-                .eq("nombre", nombre_limpio) \
+                .eq("nombre", nombre_bd) \
                 .execute()
         except Exception as e:
-            print(f"[ERROR delete codigos_etica '{nombre_limpio}']: {e}")
+            print(f"[ERROR delete codigos_etica id={ente_id} '{nombre_bd}']: {e}")
             errores_eliminacion.append({
-                "nombre": nombre_limpio,
-                "etapa":  "codigos_etica",
-                "error":  str(e),
+                "id": ente_id, "etapa": "codigos_etica", "error": str(e),
             })
             continue
 
-        # Paso 1b: borrar el ente
+        # Paso 1c: borrar el ente por ID (una sola fila, exacta).
         try:
             db.table("entes_confirmados") \
                 .delete() \
                 .eq("estado", estado) \
-                .eq("nombre", nombre_limpio) \
+                .eq("id", ente_id) \
                 .execute()
         except Exception as e:
-            print(f"[ERROR delete ente '{nombre_limpio}']: {e}")
+            print(f"[ERROR delete ente id={ente_id}]: {e}")
             errores_eliminacion.append({
-                "nombre": nombre_limpio,
-                "etapa":  "entes_confirmados",
-                "error":  str(e),
+                "id": ente_id, "etapa": "entes_confirmados", "error": str(e),
             })
 
     if errores_eliminacion:
-        nombres_fallidos = ", ".join(e["nombre"] for e in errores_eliminacion)
+        ids_fallidos = ", ".join(str(e.get("id", "?")) for e in errores_eliminacion)
         return jsonify({
             "error": (
                 f"No se pudieron eliminar {len(errores_eliminacion)} "
-                f"registro(s): {nombres_fallidos}. "
+                f"registro(s) (id: {ids_fallidos}). "
                 "No se aplicó ningún otro cambio. Intenta de nuevo."
             ),
             "detalles": errores_eliminacion,
