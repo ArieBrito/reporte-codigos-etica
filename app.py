@@ -1301,6 +1301,12 @@ DOCUMENTOS_REPOSITORIO = [
         "archivo":         "usuario.pdf",
         "nombre_descarga": "Manual_para_personas_usuarias.pdf",
     },
+    {
+        "slug":            "codigos-emitidos-presidentes-municipales",
+        "nombre":          "Códigos de ética emitidos por presidentes municipales",
+        "archivo":         "consultas.pdf",
+        "nombre_descarga": "Códigos_ética_emitidos_presidentes_municipales.pdf",
+    }
 ]
 
 # Índice por slug para lookup O(1) en la ruta de descarga.
