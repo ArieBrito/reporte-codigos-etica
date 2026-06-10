@@ -1302,10 +1302,10 @@ DOCUMENTOS_REPOSITORIO = [
         "nombre_descarga": "Manual_para_personas_usuarias.pdf",
     },
     {
-        "slug":            "codigos-emitidos-presidentes-municipales",
-        "nombre":          "Códigos de ética emitidos por presidentes municipales",
+        "slug":            "consultas",
+        "nombre":          "Consultas",
         "archivo":         "consultas.pdf",
-        "nombre_descarga": "Códigos_ética_emitidos_presidentes_municipales.pdf",
+        "nombre_descarga": "Consultas.pdf",
     }
 ]
 
