@@ -51,6 +51,25 @@ def invalidar_cache():
     _cache_resultados["data"] = None
     _cache_resultados["ts"]   = 0.0
 
+def fetch_todo(db, tabla, columnas="*", tam_pagina=1000):
+    """
+    PostgREST limita cada respuesta a `tam_pagina` filas (1000 por defecto
+    en Supabase). Para tablas que superan ese límite hay que paginar con
+    .range() hasta agotar los resultados, o las filas restantes se pierden
+    silenciosamente (sin error).
+    """
+    filas = []
+    inicio = 0
+    while True:
+        lote = db.table(tabla).select(columnas) \
+            .range(inicio, inicio + tam_pagina - 1) \
+            .execute().data or []
+        filas.extend(lote)
+        if len(lote) < tam_pagina:
+            break
+        inicio += tam_pagina
+    return filas
+
 EMAIL_DOMAIN = "sesna.internal"
 
 def usuario_a_email(usuario: str) -> str:
@@ -250,9 +269,10 @@ def api_resultados():
     resumen = db.table("vista_resultados").select("*").execute().data or []
     anios   = db.table("vista_anios").select("*").execute().data or []
 
-    detalle = db.table("codigos_etica") \
-        .select("estado, nombre, cuenta_codigo, link, fecha_publicacion, cumple_lineamientos, num_instituciones") \
-        .execute().data or []
+    detalle = fetch_todo(
+        db, "codigos_etica",
+        "estado, nombre, cuenta_codigo, link, fecha_publicacion, cumple_lineamientos, num_instituciones"
+    )
 
     detalle_map = {}
     for d in detalle:

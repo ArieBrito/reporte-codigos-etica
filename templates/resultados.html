@@ -24,11 +24,11 @@
             <p id="totalCodigos">—</p>
         </div>
         <div class="card-metric">
-            <h3>Entidades con avance</h3>
-            <p id="totalEntidades">—</p>
+            <h3>Códigos de ética que cumplen con los lineamientos emitidos por el SNA</h3>
+            <p id="totalCumplen">—</p>
         </div>
         <div class="card-metric">
-            <h3>Porcentaje de cumplimiento</h3>
+            <h3>Porcentaje de códigos de ética que cumplen con los lineamientos emitidos por el SNA</h3>
             <p id="promedioAvance">—</p>
         </div>
     </div>
@@ -39,7 +39,7 @@
     </div>
 
     <div class="panel" style="margin-bottom:30px;">
-        <h3>Porcentaje de cumplimiento por entidad</h3>
+        <h3>Porcentaje de códigos de ética que cumplen con los lineamientos emitidos por el SNA por entidad</h3>
         <div id="mapa"></div>
     </div>
 
@@ -62,6 +62,8 @@
             <tbody></tbody>
         </table>
     </div>
+
+    <p class="nota-fuente">Información proporcionada por las Secretarías Ejecutivas de los Sistemas Nacional y Estatales Anticorrupción.</p>
 
 </div>
 
@@ -86,14 +88,25 @@ let datosGlobales = null;   // último payload de /api/resultados, usado por des
 
 function renderizarMetricas(datos) {
     document.getElementById("totalCodigos").textContent = datos.total_codigos;
-    document.getElementById("totalEntidades").textContent = datos.estados.length;
 
-    const totalConSi   = datos.estados.reduce((s, e) => s + e.codigos_con_si, 0);
-    const totalNombres = datos.estados.reduce((s, e) => s + e.instituciones, 0);
-    const porcentaje   = totalNombres > 0
-        ? ((totalConSi / totalNombres) * 100).toFixed(1) + "%"
+    // % de cumplimiento = de los códigos YA PUBLICADOS (cuenta_codigo = "Sí"),
+    // cuántos cumplen los lineamientos (cumple_lineamientos = "Sí").
+    let totalPublicados = 0;
+    let totalCumplen     = 0;
+    datos.estados.forEach(e => {
+        (e.detalle || []).forEach(inst => {
+            const cuenta = inst.cuenta_codigo ?? inst.cuenta;
+            if (cuenta === "Sí") {
+                totalPublicados++;
+                if (inst.cumple_lineamientos === "Sí") totalCumplen++;
+            }
+        });
+    });
+    const porcentaje = totalPublicados > 0
+        ? ((totalCumplen / totalPublicados) * 100).toFixed(1) + "%"
         : "—";
 
+    document.getElementById("totalCumplen").textContent   = totalCumplen;
     document.getElementById("promedioAvance").textContent = porcentaje;
 }
 
@@ -195,8 +208,11 @@ function renderizarTabla(datos) {
 }
 async function renderizarMapa(datos) {
 
+    // Mapea el nombre del GeoJSON al nombre exacto guardado en BD
+    // (columna "estado" de vista_resultados). "México" ya coincide tal
+    // cual, así que no necesita entrada aquí.
     const NOMBRE_MAP = {
-        "México": "Estado de México",
+        "Michoacán": "Michoacán de Ocampo",
     };
 
     const geojson = await fetch(window.BASE_URL + "/static/estados/estados_mexico.json").then(r => r.json());
@@ -209,16 +225,26 @@ async function renderizarMapa(datos) {
         const nombreGeo  = f.properties.name;
         const nombreBD   = NOMBRE_MAP[nombreGeo] || nombreGeo;
         const estadoData = datos.estados.find(e => e.entidad === nombreBD);
-        const conSi      = estadoData ? estadoData.codigos_con_si : 0;
-        const total      = estadoData ? estadoData.instituciones  : 0;
-        const pct        = total > 0 ? ((conSi / total) * 100).toFixed(1) : 0;
+
+        // % de cumplimiento = de los códigos YA PUBLICADOS (cuenta_codigo = "Sí"),
+        // cuántos cumplen los lineamientos (cumple_lineamientos = "Sí").
+        let publicados = 0;
+        let cumplen    = 0;
+        (estadoData?.detalle || []).forEach(inst => {
+            const cuenta = inst.cuenta_codigo ?? inst.cuenta;
+            if (cuenta === "Sí") {
+                publicados++;
+                if (inst.cumple_lineamientos === "Sí") cumplen++;
+            }
+        });
+        const pct = publicados > 0 ? ((cumplen / publicados) * 100).toFixed(1) : 0;
 
         locations.push(nombreGeo);
         values.push(parseFloat(pct));
         textos.push(
             `<b>${nombreGeo}</b><br>` +
-            `Con código publicado: ${conSi}<br>` +
-            `Total instituciones: ${total}<br>` +
+            `Códigos publicados: ${publicados}<br>` +
+            `Cumplen lineamientos: ${cumplen}<br>` +
             `Tasa: ${pct}%`
         );
     });
