@@ -18,6 +18,97 @@
 
     </div>
 
+    <!-- ==================================================
+         INFORME DE RESULTADOS
+    =================================================== -->
+    <section class="informe" aria-labelledby="informe-titulo">
+
+        <header class="seccion-encabezado">
+            <div>
+                <h2 id="informe-titulo">Informe de resultados</h2>
+                <p>Descarga el documento completo en formato PDF.</p>
+            </div>
+        </header>
+
+        <article class="informe-card">
+
+            <a class="informe-portada"
+               href="{{ url_for('informe', modo='ver') }}"
+               target="_blank" rel="noopener"
+               aria-label="Ver el informe en línea (se abre en una pestaña nueva)">
+                <img src="{{ url_for('static', filename='portada_informe.jpg') }}"
+                     alt="Portada del Primer Informe de Seguimiento a la Emisión de Códigos de Ética, 2026"
+                     width="1878" height="2429" decoding="async">
+            </a>
+
+            <div class="informe-cuerpo">
+                <p class="informe-antetitulo">Primer informe de seguimiento · 2026</p>
+                <h3>Seguimiento a la emisión de Códigos de Ética</h3>
+                <p class="informe-descripcion">
+                    El Primer Informe de Seguimiento a la Emisión de Códigos de Ética 
+                    da a conocer el estado que guarda, a nivel nacional, la emisión de estos instrumentos. 
+                    Su propósito es aportar evidencia que oriente a los entes públicos 
+                    y a los Sistemas Nacional y Estatales Anticorrupción 
+                    en el fortalecimiento de la integridad en el servicio público.
+                </p>
+
+                <div class="informe-acciones">
+                    <a class="btn-informe btn-informe--primario"
+                       href="{{ url_for('informe', modo='descargar') }}" download>
+                        <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M12 4v11M7 10l5 5 5-5M5 20h14"/></svg>
+                        Descargar informe
+                        <span class="btn-informe-detalle">PDF{% if informe_tamano %}, {{ informe_tamano }}{% endif %}</span>
+                    </a>
+                    <a class="btn-informe btn-informe--secundario"
+                       href="{{ url_for('informe', modo='ver') }}"
+                       target="_blank" rel="noopener">
+                        <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M14 4h6v6M20 4l-9 9M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"/></svg>
+                        Ver en línea
+                        <span class="sr-only">(se abre en una pestaña nueva)</span>
+                    </a>
+                </div>
+
+                <p class="informe-meta-titulo" id="informe-meta-titulo">Información del documento</p>
+                <dl class="informe-meta" aria-labelledby="informe-meta-titulo">
+                    <div class="informe-meta-item">
+                        <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/></svg>
+                        <div>
+                            <dt>Formato</dt>
+                            <dd>PDF{% if informe_tamano %} · {{ informe_tamano }}{% endif %}</dd>
+                        </div>
+                    </div>
+                    <div class="informe-meta-item">
+                        <svg aria-hidden="true" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18"/></svg>
+                        <div>
+                            <dt>Idioma</dt>
+                            <dd>Español</dd>
+                        </div>
+                    </div>
+                    <div class="informe-meta-item">
+                        <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M4 6h16M4 10h16M4 14h10M4 18h7"/></svg>
+                        <div>
+                            <dt>Tipo de recurso</dt>
+                            <dd>Informe de resultados</dd>
+                        </div>
+                    </div>
+                </dl>
+            </div>
+
+        </article>
+    </section>
+
+    <!-- ==================================================
+         TABLERO
+    =================================================== -->
+    <section class="tablero" aria-labelledby="tablero-titulo">
+
+    <header class="seccion-encabezado">
+        <div>
+            <h2 id="tablero-titulo">Indicadores del tablero</h2>
+            <p>Datos reportados por las Secretarías Ejecutivas, actualizados en tiempo real.</p>
+        </div>
+    </header>
+
     <div class="cards">
         <div class="card-metric">
             <h3>Total de códigos registrados</h3>
@@ -64,6 +155,8 @@
     </div>
 
     <p class="nota-fuente">Información proporcionada por las Secretarías Ejecutivas de los Sistemas Nacional y Estatales Anticorrupción.</p>
+
+    </section>
 
 </div>
 
@@ -405,16 +498,7 @@ function iniciarRealtime() {
             { event: "*", schema: "public", table: "entes_confirmados" },
             () => cargarDatos()
         )
-        .subscribe(status => {
-            const badge = document.getElementById("indicador-live");
-            if (status === "SUBSCRIBED") {
-                badge.classList.add("conectado");
-                badge.textContent = "● EN VIVO";
-            } else {
-                badge.classList.remove("conectado");
-                badge.textContent = "○ Reconectando...";
-            }
-        });
+        .subscribe();
 }
 
 // ======================================================

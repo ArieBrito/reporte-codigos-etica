@@ -2,7 +2,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 from flask import Flask, render_template, request, jsonify, session, redirect, url_for, Response
-import os, io, re, time, unicodedata, requests
+import os, io, re, time, threading, unicodedata, requests
 from functools import wraps
 from datetime import datetime
 
@@ -241,7 +241,92 @@ def resultados():
         usuario=session.get("usuario"),
         estado=session.get("estado"),
         supabase_url=SUPABASE_URL,
-        supabase_key=SUPABASE_KEY
+        supabase_key=SUPABASE_KEY,
+        informe_tamano=_tamano_informe_legible()
+    )
+
+# ==============================================================
+# INFORME DE RESULTADOS (descarga pública)
+# ==============================================================
+#
+# El PDF vive en el bucket PRIVADO `informe`. Es un documento público,
+# así que se sirve sin sesión, pero siempre a través de Flask (whitelist
+# de un único archivo) para no exponer el bucket ni el service key.
+#
+# Para publicar una nueva versión: subir el PDF al bucket y actualizar
+# INFORME["archivo"].
+
+INFORME = {
+    "bucket":          "informe",
+    "archivo":         "Informe_CE_vf_28.10.26.pdf",
+    "nombre_descarga": "Informe_Seguimiento_Codigos_de_Etica.pdf",
+}
+INFORME_TTL = 3600  # segundos que se conserva el PDF en memoria
+
+_cache_informe: dict = {"bytes": None, "ts": 0.0}
+
+
+def _obtener_informe() -> bytes:
+    """Descarga el PDF del bucket privado y lo cachea en memoria."""
+    ahora = time.time()
+    if _cache_informe["bytes"] and (ahora - _cache_informe["ts"] < INFORME_TTL):
+        return _cache_informe["bytes"]
+
+    contenido = supabase_admin.storage \
+        .from_(INFORME["bucket"]) \
+        .download(INFORME["archivo"])
+
+    _cache_informe["bytes"] = contenido
+    _cache_informe["ts"]    = ahora
+    return contenido
+
+
+def _tamano_informe_legible():
+    """
+    Tamaño del informe (p. ej. "1.8 MB") para mostrarlo junto al botón.
+    Solo usa el PDF ya cacheado: nunca bloquea el render de /resultados
+    con una llamada a Storage. Si aún no se ha descargado, devuelve None
+    y la plantilla omite el dato.
+    """
+    contenido = _cache_informe["bytes"]
+    if not contenido:
+        return None
+    return f"{len(contenido) / (1024 * 1024):.1f} MB"
+
+
+def _precargar_informe():
+    try:
+        _obtener_informe()
+    except Exception as e:
+        app.logger.warning("No se pudo precargar el informe: %s", e)
+
+# Precarga en segundo plano para que el tamaño aparezca desde la primera visita.
+threading.Thread(target=_precargar_informe, daemon=True).start()
+
+
+@app.route("/informe/<modo>")
+def informe(modo):
+    """
+    /informe/descargar -> fuerza la descarga (attachment).
+    /informe/ver       -> abre el PDF en el visor del navegador (inline).
+    """
+    if modo not in ("descargar", "ver"):
+        return jsonify({"error": "Recurso no encontrado"}), 404
+
+    try:
+        contenido = _obtener_informe()
+    except Exception as e:
+        app.logger.exception("Error descargando informe %s: %s", INFORME["archivo"], e)
+        return jsonify({"error": "No se pudo recuperar el informe"}), 502
+
+    disposicion = "attachment" if modo == "descargar" else "inline"
+    return Response(
+        contenido,
+        mimetype="application/pdf",
+        headers={
+            "Content-Disposition": f'{disposicion}; filename="{INFORME["nombre_descarga"]}"',
+            "Cache-Control":       "public, max-age=3600",
+        },
     )
 
 @app.route("/menu")
