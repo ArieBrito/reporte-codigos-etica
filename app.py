@@ -51,23 +51,78 @@ def invalidar_cache():
     _cache_resultados["data"] = None
     _cache_resultados["ts"]   = 0.0
 
-def fetch_todo(db, tabla, columnas="*", tam_pagina=1000):
+def fetch_todo(db, tabla, columnas="*", tam_pagina=1000, orden=("estado", "nombre")):
     """
     PostgREST limita cada respuesta a `tam_pagina` filas (1000 por defecto
     en Supabase). Para tablas que superan ese límite hay que paginar con
     .range() hasta agotar los resultados, o las filas restantes se pierden
     silenciosamente (sin error).
+
+    CRÍTICO — `orden` no es opcional en la práctica:
+    cada página es una petición HTTP independiente, es decir una consulta
+    distinta con LIMIT/OFFSET. Sin ORDER BY, Postgres NO garantiza el mismo
+    orden entre consultas (`synchronize_seqscans` está activo por omisión,
+    así que un seq scan puede arrancar en un bloque distinto, y cualquier
+    escritura intermedia mueve filas de lugar). Las páginas se traslapan:
+    una fila se repite en dos páginas y otra se brinca. El total nacional
+    sigue cuadrando, de modo que la pérdida es invisible — así es como el
+    tablero llegó a mostrar 134 instituciones de Jalisco cuando la base
+    tiene 135. Por eso se ordena por una llave ÚNICA y estable
+    (estado, nombre) antes de paginar.
+
+    Además se verifica el total contra el `count` exacto que reporta
+    PostgREST, para que cualquier pérdida futura quede registrada en log
+    en vez de pasar inadvertida.
     """
-    filas = []
+    filas  = []
     inicio = 0
+    total  = None
+
     while True:
-        lote = db.table(tabla).select(columnas) \
-            .range(inicio, inicio + tam_pagina - 1) \
-            .execute().data or []
+        # El count exacto solo se pide en la primera página (es un escaneo
+        # completo; no hace falta repetirlo en cada vuelta).
+        if total is None:
+            consulta = db.table(tabla).select(columnas, count="exact")
+        else:
+            consulta = db.table(tabla).select(columnas)
+
+        for columna in orden:
+            consulta = consulta.order(columna)
+
+        resp = consulta.range(inicio, inicio + tam_pagina - 1).execute()
+        lote = resp.data or []
+
+        if total is None:
+            total = resp.count
+
         filas.extend(lote)
+
         if len(lote) < tam_pagina:
             break
         inicio += tam_pagina
+
+    # Red de seguridad: si aun así llegaran filas repetidas (p. ej. un
+    # INSERT concurrente que empuja una fila al cruzar el límite de
+    # página), se colapsan por la llave única y se deja constancia.
+    if orden and filas:
+        vistos = {}
+        for fila in filas:
+            try:
+                clave = tuple(fila[c] for c in orden)
+            except KeyError:
+                vistos = None   # la llave no viene en `columnas`: no dedup
+                break
+            vistos[clave] = fila
+
+        if vistos is not None and len(vistos) != len(filas):
+            print(f"[WARN fetch_todo] {tabla}: {len(filas) - len(vistos)} "
+                  f"fila(s) repetida(s) entre páginas; se colapsaron.")
+            filas = list(vistos.values())
+
+    if total is not None and len(filas) != total:
+        print(f"[WARN fetch_todo] {tabla}: se recuperaron {len(filas)} filas "
+              f"pero la tabla reporta {total}. Revisa la paginación.")
+
     return filas
 
 EMAIL_DOMAIN = "sesna.internal"
